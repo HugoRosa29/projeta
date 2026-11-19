@@ -1,0 +1,16 @@
+node_modules/
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+*.tsbuildinfo
+dist/
+.next/
+var/
+.env
+.env.local
+docker-compose.override.yml
+backend/.env
+.dist/
+_backup/

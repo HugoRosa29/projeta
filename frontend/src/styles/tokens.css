@@ -1,0 +1,113 @@
+/* Tokens "Eixos & Curvas" — identidade do portal Terracap (verde, azul, dourado sobre concreto e grafite).
+   Fonte dos valores: portal-terracap/wp-content/themes/terracap2026/assets/css/terracap.css. */
+@import "@fontsource/space-grotesk/500.css";
+@import "@fontsource/space-grotesk/700.css";
+@import "@fontsource/public-sans/400.css";
+@import "@fontsource/public-sans/600.css";
+@import "@fontsource/jetbrains-mono/400.css";
+
+:root {
+  --ink: #1d2420;
+  --ink-60: #5c665f;
+  --paper: #f5f6f2;
+  --paper-deep: #e7e9e2;
+  --white: #ffffff;
+  --surface: #ffffff;
+
+  --verde: #00753c;
+  --verde-deep: #00532a;
+  --verde-tint: #e2f1e7;
+  --azul: #003d6b;
+  --azul-deep: #00263f;
+  --azul-tint: #e5edf3;
+  --dourado: #c9a10d;
+  --dourado-deep: #a17f09;
+  --dourado-tint: #fbf2d9;
+  --alerta: #a3382a;
+  --alerta-tint: #f3e3e0;
+  --line: #d7dad2;
+  --on-verde: #ffffff;
+
+  /* Gráficos do panorama: passos validados (luminosidade, separação para daltonismo, contraste)
+     em cada modo — por isso o escuro tem valores próprios, e não os tons claros de --verde etc. */
+  --chart-ok: #00753c;
+  --chart-warn: #c9a10d;
+  --chart-bad: #a3382a;
+  --chart-info: #2f6fb0;
+  --chart-on-ok: #ffffff;
+  --chart-on-warn: #1d2420;
+  --chart-on-bad: #ffffff;
+  --chart-on-info: #ffffff;
+
+  --display: "Space Grotesk", system-ui, sans-serif;
+  --body: "Public Sans", system-ui, sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, monospace;
+
+  --radius-md: 16px;
+  --radius-sm: 10px;
+  --nav-w: 232px;
+  --assistant-w: 400px;
+}
+
+/* Escuro: segue o sistema, a menos que a pessoa escolha "claro"; ou é forçado por data-theme="dark". */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --ink: #e3e9e5;
+    --ink-60: #9da9a2;
+    --paper: #0e1411;
+    --paper-deep: #2b3530;
+    --surface: #151d19;
+    --verde: #4cc282;
+    --verde-deep: #7ad6a3;
+    --verde-tint: #16301f;
+    --azul: #86b7e3;
+    --azul-deep: #0c2438;
+    --azul-tint: #172a3c;
+    --dourado: #e2bc3f;
+    --dourado-deep: #ebcb6b;
+    --dourado-tint: #3a3113;
+    --alerta: #f2998b;
+    --alerta-tint: #3d201c;
+    --line: #3a4540;
+    --on-verde: #0e1411;
+    --chart-ok: #2a9a5e;
+    --chart-warn: #b28c16;
+    --chart-bad: #d4473c;
+    --chart-info: #4a86c0;
+    --chart-on-ok: #0e1411;
+    --chart-on-warn: #0e1411;
+    --chart-on-bad: #0e1411;
+    --chart-on-info: #0e1411;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --ink: #e3e9e5;
+  --ink-60: #9da9a2;
+  --paper: #0e1411;
+  --paper-deep: #2b3530;
+  --surface: #151d19;
+  --verde: #4cc282;
+  --verde-deep: #7ad6a3;
+  --verde-tint: #16301f;
+  --azul: #86b7e3;
+  --azul-deep: #0c2438;
+  --azul-tint: #172a3c;
+  --dourado: #e2bc3f;
+  --dourado-deep: #ebcb6b;
+  --dourado-tint: #3a3113;
+  --alerta: #f2998b;
+  --alerta-tint: #3d201c;
+  --line: #3a4540;
+  --on-verde: #0e1411;
+  --chart-ok: #2a9a5e;
+  --chart-warn: #b28c16;
+  --chart-bad: #d4473c;
+  --chart-info: #4a86c0;
+  --chart-on-ok: #0e1411;
+  --chart-on-warn: #0e1411;
+  --chart-on-bad: #0e1411;
+  --chart-on-info: #0e1411;
+  color-scheme: dark;
+}
+:root[data-theme="light"] { color-scheme: light; }

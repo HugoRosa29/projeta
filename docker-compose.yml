@@ -1,0 +1,50 @@
+# Sobe tudo: `docker compose up --build` (ou `make up`) e abra http://localhost:5173.
+# Configuração opcional num arquivo .env na raiz (ignorado pelo git): veja .env.example.
+# Produção: veja docs/guides/deploy.md.
+services:
+  db:
+    image: postgres:17-alpine
+    container_name: projeta-pg
+    environment:
+      POSTGRES_USER: projeta
+      POSTGRES_PASSWORD: projeta # valor de desenvolvimento
+      POSTGRES_DB: projeta
+    ports:
+      - "55432:5432"
+    volumes:
+      - projeta-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U projeta"]
+      interval: 3s
+      retries: 20
+
+  api:
+    build: ./backend
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://projeta:projeta@db:5432/projeta
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      GIA_SERVICE: ${GIA_SERVICE:-http://gia-api}
+      GIA_ENDPOINT: ${GIA_ENDPOINT:-/auth/autenticar}
+      GIA_SYSTEM_ID: ${GIA_SYSTEM_ID:-653}
+      GIA_VERIFY_SSL: ${GIA_VERIFY_SSL:-true}
+      ASSISTANT_PROVIDER: ${ASSISTANT_PROVIDER:-mock}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-5-mini}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2)"]
+      interval: 5s
+      retries: 20
+
+  web:
+    build: ./frontend
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "5173:80"
+
+volumes:
+  projeta-pgdata:
