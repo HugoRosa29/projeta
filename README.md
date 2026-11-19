@@ -94,4 +94,4 @@ Sem Make, execute o mesmo portão no Git Bash com `bash scripts/check.sh`, ou no
 
 Veja [o estado de implementação e as pendências](docs/product/roadmap.md) e [o registro desta retomada](docs/product/retomada.md). As regras de contribuição estão em [AGENTS.md](AGENTS.md). Esta cópia de trabalho foi recebida sem `.git`; verificações de segredos e artefatos versionados são ignoradas pelo portão nessa condição.
 
-O ambiente descrito é de desenvolvimento. Implantação, restauração de backups, piloto, revisão de acessibilidade e operação de produção ainda precisam ser validados.
+O ambiente descrito é de desenvolvimento. A configuração de produção no Dokploy (`docker-compose.prod.yml`) está em [docs/guides/deploy.md](docs/guides/deploy.md). O deploy em si, restauração de backups, piloto, revisão de acessibilidade e operação de produção ainda precisam ser validados.

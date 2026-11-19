@@ -1,0 +1,49 @@
+# Produção (Dokploy): Compose Path = ./docker-compose.prod.yml. Guia: docs/guides/deploy.md.
+# Difere do docker-compose.yml de desenvolvimento em: nenhuma porta publicada no host (o Dokploy
+# encaminha o domínio para web:80), sem container_name fixo (evita conflito com outras instalações
+# no mesmo servidor) e senha do banco obrigatória, vinda do ambiente.
+# POSTGRES_PASSWORD: longa, aleatória e só alfanumérica — entra sem escape na DATABASE_URL.
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: projeta
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD no Environment do Dokploy}
+      POSTGRES_DB: projeta
+    volumes:
+      - projeta-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U projeta"]
+      interval: 3s
+      retries: 20
+
+  api:
+    build: ./backend
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://projeta:${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD no Environment do Dokploy}@db:5432/projeta
+      # Em domínio HTTPS, defina COOKIE_SECURE=true no Environment.
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      GIA_SERVICE: ${GIA_SERVICE:-http://gia-api}
+      GIA_ENDPOINT: ${GIA_ENDPOINT:-/auth/autenticar}
+      GIA_SYSTEM_ID: ${GIA_SYSTEM_ID:-653}
+      GIA_VERIFY_SSL: ${GIA_VERIFY_SSL:-true}
+      ASSISTANT_PROVIDER: ${ASSISTANT_PROVIDER:-mock}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-5-mini}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2)"]
+      interval: 5s
+      retries: 20
+
+  # Nginx serve a SPA e faz proxy de /api e /health para api:8000 (frontend/nginx.conf).
+  web:
+    build: ./frontend
+    depends_on:
+      api:
+        condition: service_healthy
+
+volumes:
+  projeta-pgdata:

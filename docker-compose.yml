@@ -7,7 +7,7 @@ services:
     container_name: projeta-pg
     environment:
       POSTGRES_USER: projeta
-      POSTGRES_PASSWORD: projeta # valor de desenvolvimento
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD}
       POSTGRES_DB: projeta
     ports:
       - "55432:5432"
