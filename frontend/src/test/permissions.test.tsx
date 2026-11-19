@@ -54,3 +54,9 @@ it("convite só concede perfil igual ou abaixo, e nunca o de Gestor sem sê-lo",
   expect(invitableRoles("manager")).toEqual(["manager", "member", "viewer"]);
   expect(invitableRoles("viewer")).toEqual(["viewer"]);
 });
+
+it("nome do arquivo de exportação é seguro e datado", async () => {
+  const { exportFilename } = await import("../features/settings/SettingsPage");
+  expect(exportFilename("DISID – Gestão", new Date("2026-11-19T12:00:00Z"))).toBe("projeta-disid-gestao-2026-11-19.json");
+  expect(exportFilename("***", new Date("2026-11-19T12:00:00Z"))).toBe("projeta-espaco-2026-11-19.json");
+});

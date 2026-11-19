@@ -1,7 +1,11 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
+from fastapi.responses import JSONResponse
+from starlette.concurrency import run_in_threadpool
 
 from ...db import uow
+from ...errors import BadRequestError
 from ...identity import workspaces as svc
+from ...work import transfer
 from ..deps import current_user
 from ..schemas import InviteIn, PermissionsIn, PrefsIn, RoleIn, WorkspaceIn, WorkspacePatch
 
@@ -76,3 +80,37 @@ def revoke(workspace_id: str, invitation_id: str, user: dict = Depends(current_u
 def prefs(workspace_id: str, body: PrefsIn, user: dict = Depends(current_user)) -> None:
     with uow(user["id"]) as ctx:
         svc.update_my_prefs(ctx, workspace_id, body.notify_email, body.notify_inapp)
+
+
+@router.get("/workspaces/{workspace_id}/export")
+def export(workspace_id: str, user: dict = Depends(current_user)) -> JSONResponse:
+    with uow(user["id"]) as ctx:
+        data = transfer.export_workspace(ctx, workspace_id)
+    # Nome do arquivo sem o nome do espaço: cabeçalho só aceita ASCII e o nome é dado do usuário.
+    return JSONResponse(
+        data,
+        headers={
+            "Content-Disposition": 'attachment; filename="projeta-espaco.json"',
+            "Cache-Control": "no-store",
+        },
+    )
+
+
+@router.post("/workspaces/import", status_code=201)
+async def import_(
+    request: Request,
+    workspace_id: str | None = None,
+    name: str | None = None,
+    user: dict = Depends(current_user),
+) -> dict:
+    # Corpo é o arquivo de exportação cru. Recusa antes de ler tudo quando já declara ser grande.
+    declared = request.headers.get("content-length")
+    if declared and declared.isdigit() and int(declared) > transfer.MAX_FILE_BYTES:
+        raise BadRequestError("O arquivo passa de 64 MB. Exporte o espaço sem capas grandes.")
+    raw = await request.body()
+
+    def run() -> dict:
+        with uow(user["id"]) as ctx:
+            return transfer.import_workspace(ctx, raw, workspace_id or None, name)
+
+    return await run_in_threadpool(run)

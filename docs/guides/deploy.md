@@ -62,3 +62,20 @@ Use uma senha fictícia só para essa checagem. Sem `POSTGRES_PASSWORD`, o coman
 ## Ainda não validado
 
 Este guia descreve a configuração; o deploy em si, backups e restauração do volume `projeta-pgdata` e a operação de produção ainda precisam ser validados.
+
+## Levar um espaço de uma instalação para outra
+
+Serve, por exemplo, para trazer um espaço do ambiente local para a produção.
+
+1. Na instalação de origem, abra **Configurações** no espaço e clique em **Exportar espaço**. Só o Gestor exporta. O arquivo `.json` leva:
+   - projetos, com capa, TAP/TEP, notas semanais e campos livres;
+   - tarefas, subtarefas e dependências;
+   - comentários e histórico;
+   - pessoas, identificadas pela matrícula.
+
+   Tarefas pessoais de outras pessoas não saem.
+2. Na instalação de destino, em **Configurações → Espaços → Importar espaço**, escolha o arquivo e o destino. Pode ser um espaço de equipe novo ou um espaço onde você é Gestor.
+3. Nada do destino é sobrescrito, porque tudo entra como registro novo. Pessoas que já têm conta no destino são vinculadas pela matrícula. As que não têm viram convite pendente ao projeto e entram no primeiro login pelo GIA.
+4. Comentários e notas de quem não tem conta no destino ficam no nome de quem importou. Nos comentários, o nome original aparece no início do texto.
+
+O arquivo contém o conteúdo do espaço. Guarde-o como dado sensível e apague-o depois de importar.

@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
 import { Empty, ErrorBox, Loading, useToast } from "../../components/ui";
-import { ROLE_LABEL, can, type Member, type Permission, type Role } from "../../domain/types";
+import { ROLE_LABEL, can, type Member, type Permission, type Role, type Workspace } from "../../domain/types";
 import { api } from "../../services/api";
 import { useSession } from "../../app/session";
 
@@ -55,6 +55,14 @@ export function SettingsPage() {
   });
   const revoke = useMutation({ mutationFn: (id: string) => api.del(`/workspaces/${workspace.id}/invitations/${id}`), onSuccess: done("Convite revogado"), onError: fail });
   const prefs = useMutation({ mutationFn: (b: object) => api.patch(`/workspaces/${workspace.id}/me`, b), onSuccess: done("Preferência salva"), onError: fail });
+  const [exporting, setExporting] = useState(false);
+  const exportWs = () => {
+    setExporting(true);
+    api
+      .download(`/workspaces/${workspace.id}/export`, exportFilename(workspace.name))
+      .then(() => toast("Exportação baixada"), fail)
+      .finally(() => setExporting(false));
+  };
   const tz = useMutation({ mutationFn: (timezone: string) => api.patch("/me/timezone", { timezone }), onSuccess: done("Fuso atualizado"), onError: fail });
 
   return (
@@ -76,6 +84,7 @@ export function SettingsPage() {
             </li>
           ))}
         </ul>
+        <ImportWorkspace targets={workspaces.filter((w) => w.role === "admin")} onDone={(id) => (setWorkspaceId(id), done("Espaço importado")())} onError={fail} />
         <form className="row" onSubmit={(e: FormEvent) => (e.preventDefault(), createTeam.mutate())}>
           <label className="sr-only" htmlFor="team-name">Nome do novo espaço de equipe</label>
           <input id="team-name" className="input grow" placeholder="Novo espaço de equipe…" value={teamName} onChange={(e) => setTeamName(e.target.value)} />
@@ -111,6 +120,10 @@ export function SettingsPage() {
             </select>
             <button className="btn btn-line">Salvar nome</button>
           </form>
+          <div className="row" style={{ marginTop: 12, gap: 8 }}>
+            <button className="btn btn-line" disabled={exporting} onClick={exportWs}>{exporting ? "Exportando…" : "Exportar espaço"}</button>
+            <span className="muted">Baixa um arquivo com projetos, tarefas, comentários, histórico e pessoas, para importar em outra instalação.</span>
+          </div>
         </section>
       )}
 
@@ -234,5 +247,64 @@ export function PermissionsMatrix({ workspaceId, editable, onSaved, onError }: {
         </div>
       )}
     </section>
+  );
+}
+
+export function exportFilename(name: string, today = new Date()): string {
+  const slug = name.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^A-Za-z0-9]+/g, "-").replace(/^-|-$/g, "").toLowerCase() || "espaco";
+  return `projeta-${slug}-${today.toISOString().slice(0, 10)}.json`;
+}
+
+interface ImportSummary {
+  workspace_id: string;
+  projects: number;
+  tasks: number;
+  comments: number;
+  activity: number;
+  people_linked: number;
+  people_invited: number;
+  people_missing: string[];
+}
+
+/** Importa um arquivo de "Exportar espaço" como espaço novo ou dentro de um espaço onde é Gestor. */
+export function ImportWorkspace({ targets, onDone, onError }: { targets: Workspace[]; onDone: (id: string) => void; onError: (e: unknown) => void }) {
+  const [file, setFile] = useState<File | null>(null);
+  const [target, setTarget] = useState("new");
+  const [name, setName] = useState("");
+  const [result, setResult] = useState<ImportSummary | null>(null);
+  const run = useMutation({
+    mutationFn: () => api.sendFile<ImportSummary>("/workspaces/import", file!, target === "new" ? { name: name.trim() || undefined } : { workspace_id: target }),
+    onSuccess: (r) => (setResult(r), setFile(null), onDone(r.workspace_id)),
+    onError,
+  });
+  return (
+    <form className="card" style={{ margin: "12px 0" }} onSubmit={(e: FormEvent) => (e.preventDefault(), run.mutate())}>
+      <h3 style={{ margin: 0 }}>Importar espaço</h3>
+      <p className="muted" style={{ marginTop: 4 }}>Use o arquivo gerado em “Exportar espaço” em outra instalação. Nada do destino é sobrescrito: projetos e tarefas entram como novos.</p>
+      <div className="row" style={{ marginTop: 8 }}>
+        <label className="sr-only" htmlFor="imp-file">Arquivo de exportação</label>
+        <input id="imp-file" type="file" accept="application/json,.json" className="input grow" onChange={(e) => (setFile(e.target.files?.[0] ?? null), setResult(null))} />
+        <label className="sr-only" htmlFor="imp-target">Destino</label>
+        <select id="imp-target" className="select grow" value={target} onChange={(e) => setTarget(e.target.value)}>
+          <option value="new">Novo espaço de equipe</option>
+          {targets.map((w) => <option key={w.id} value={w.id}>Dentro de “{w.name}”</option>)}
+        </select>
+        {target === "new" && (
+          <>
+            <label className="sr-only" htmlFor="imp-name">Nome do novo espaço</label>
+            <input id="imp-name" className="input grow" placeholder="Nome (padrão: o do arquivo)" value={name} onChange={(e) => setName(e.target.value)} />
+          </>
+        )}
+        <button className="btn btn-primary" disabled={!file || run.isPending}>{run.isPending ? "Importando…" : "Importar"}</button>
+      </div>
+      {result && (
+        <p role="status" style={{ marginTop: 8 }}>
+          Importados {result.projects} projetos, {result.tasks} tarefas, {result.comments} comentários e {result.activity} registros de histórico.
+          {result.people_linked > 0 && ` ${result.people_linked} pessoas vinculadas.`}
+          {result.people_invited > 0 && ` ${result.people_invited} convites pendentes por matrícula.`}
+          {result.people_missing.length > 0 && ` Sem conta aqui: ${result.people_missing.join(", ")}.`}
+        </p>
+      )}
+    </form>
   );
 }
