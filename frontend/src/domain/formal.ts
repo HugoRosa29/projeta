@@ -7,6 +7,8 @@ export type Health = "on_track" | "at_risk" | "late";
 /** Linha de GET /portfolio: projeto ativo visível à pessoa, com contagens calculadas no servidor. */
 export interface PortfolioRow {
   id: string;
+  /** Espaço dono do projeto (o próprio ou o de uma unidade abaixo no organograma). */
+  workspace_id?: string;
   /** Espaço de origem quando o projeto veio de uma unidade abaixo no organograma. */
   shared_from?: string | null;
   name: string;

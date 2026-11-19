@@ -23,6 +23,8 @@ import {
 import { STATUS_LABEL } from "../../domain/types";
 import { attributeIndex } from "../../domain/work";
 import { api } from "../../services/api";
+import { areasOf, pickArea } from "../../domain/areas";
+import { AreaSummary, AreaTabs, areaQuery, useArea } from "./Areas";
 import { Esteira } from "./Esteira";
 
 const HEALTH_TONE: Record<Health, string> = { on_track: "ok", at_risk: "warn", late: "bad" };
@@ -39,11 +41,32 @@ export function Overview({ workspaceId, workspaceName }: { workspaceId: string; 
   if (q.isError) return <ErrorBox error={q.error} onRetry={() => q.refetch()} />;
   // Sem projeto ativo, o panorama não tem o que mostrar: a home fica só com as tarefas.
   if (!q.data?.projects.length) return null;
-  // A chave zera os filtros ao trocar de espaço: campos e valores de um não valem no outro.
-  return <Panorama key={workspaceId} rows={q.data.projects} workspaceName={workspaceName} />;
+  return <AreaPanorama rows={q.data.projects} workspaceId={workspaceId} workspaceName={workspaceName} />;
 }
 
-export function Panorama({ rows, workspaceName }: { rows: PortfolioRow[]; workspaceName: string }) {
+/** Com projetos recebidos de outras áreas (organograma), separa por área: "Geral" com o resumo
+ *  por área, ou o panorama de uma área só. Sem projetos recebidos, é o panorama de sempre. */
+function AreaPanorama({ rows, workspaceId, workspaceName }: { rows: PortfolioRow[]; workspaceId: string; workspaceName: string }) {
+  const [areaId, setArea] = useArea();
+  const areas = useMemo(() => areasOf(rows, workspaceId, workspaceName), [rows, workspaceId, workspaceName]);
+  const split = areas.length > 1;
+  const area = split ? pickArea(areas, areaId) : null;
+  return (
+    <>
+      {split && <AreaTabs areas={areas} current={area?.id ?? null} onPick={setArea} total={rows.length} />}
+      {split && !area && <AreaSummary areas={areas} onPick={setArea} />}
+      {/* A chave zera os filtros ao trocar de espaço ou de área: campos de um não valem no outro. */}
+      <Panorama
+        key={`${workspaceId}:${area?.id ?? ""}`}
+        rows={area ? area.rows : rows}
+        workspaceName={area ? area.label : workspaceName}
+        portfolioHref={`/portfolio${areaQuery(area?.id)}`}
+      />
+    </>
+  );
+}
+
+export function Panorama({ rows, workspaceName, portfolioHref = "/portfolio" }: { rows: PortfolioRow[]; workspaceName: string; portfolioHref?: string }) {
   const [filter, setFilter] = useState<OverviewFilter>(NO_FILTER);
   const index = useMemo(() => attributeIndex(rows.map((r) => r.attributes)), [rows]);
   const [picked, setGroupBy] = useState("");
@@ -71,7 +94,7 @@ export function Panorama({ rows, workspaceName }: { rows: PortfolioRow[]; worksp
           <h2 id="ov-title">Panorama</h2>
           <p className="muted">{subtitle}</p>
         </div>
-        <Link to="/portfolio" className="btn btn-ghost btn-sm">Abrir portfólio</Link>
+        <Link to={portfolioHref} className="btn btn-ghost btn-sm">Abrir portfólio</Link>
       </div>
 
       {(index.size > 0 || filter.health) && (

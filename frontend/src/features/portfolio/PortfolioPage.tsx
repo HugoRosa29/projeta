@@ -9,6 +9,8 @@ import { HEALTH_LABEL, PHASE_LABEL, type Health, type Phase, type PortfolioRow a
 import { attributeIndex, attributeValue, projectProgress } from "../../domain/work";
 import { api } from "../../services/api";
 import { coverUrl } from "../projects/cover";
+import { areasOf, pickArea } from "../../domain/areas";
+import { AreaTabs, useArea } from "../today/Areas";
 
 const PHASES = Object.keys(PHASE_LABEL) as Phase[];
 const SEVERITY: Record<Health, number> = { late: 0, at_risk: 1, on_track: 2 };
@@ -20,6 +22,7 @@ export function PortfolioPage() {
   const [filter, setFilter] = useState<Filter>("all");
   const [field, setField] = useState("");
   const [fieldValue, setFieldValue] = useState("");
+  const [areaId, setArea] = useArea();
   const q = useQuery({
     queryKey: ["portfolio", workspace.id],
     queryFn: () => api.get<{ projects: Row[] }>("/portfolio", { workspace_id: workspace.id }),
@@ -27,7 +30,10 @@ export function PortfolioPage() {
   if (q.isLoading) return <Loading />;
   if (q.isError) return <ErrorBox error={q.error} onRetry={() => q.refetch()} />;
 
-  const all = [...q.data!.projects].sort((a, b) => SEVERITY[a.health] - SEVERITY[b.health] || a.name.localeCompare(b.name, "pt-BR"));
+  const everything = q.data!.projects;
+  const areas = areasOf(everything, workspace.id, workspace.name);
+  const area = areas.length > 1 ? pickArea(areas, areaId) : null;
+  const all = [...(area ? area.rows : everything)].sort((a, b) => SEVERITY[a.health] - SEVERITY[b.health] || a.name.localeCompare(b.name, "pt-BR"));
   const index = attributeIndex(all.map((r) => r.attributes));
   // O filtro por campo vale também para os contadores de situação.
   const rows = field ? all.filter((r) => (fieldValue ? attributeValue(r.attributes, field) === fieldValue : attributeValue(r.attributes, field) !== undefined)) : all;
@@ -42,7 +48,9 @@ export function PortfolioPage() {
 
   return (
     <>
-      <Hero eyebrow="Portfólio" title="Visão do portfólio" subtitle={`Projetos ativos de ${workspace.name} que você pode ver.`} />
+      <Hero eyebrow="Portfólio" title="Visão do portfólio" subtitle={area ? `Projetos ativos de ${area.label}, recebidos por ${workspace.name}.` : `Projetos ativos de ${workspace.name} que você pode ver.`} />
+
+      {areas.length > 1 && <AreaTabs areas={areas} current={area?.id ?? null} onPick={setArea} total={everything.length} />}
 
       {index.size > 0 && (
         <div className="row pf-fields" role="search" aria-label="Filtrar por campo do portfólio">

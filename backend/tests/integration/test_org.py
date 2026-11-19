@@ -81,7 +81,10 @@ def test_compartilhar_com_a_cotin_da_leitura_conforme_a_matriz(org_tree):
     with uow(t["cotin"]["id"]) as ctx:
         [p] = [p for p in projects.list_projects(ctx, t["ws_cotin"]) if p["id"] == t["pid"]]
         assert p["shared_from"] == "DISID"
-        assert t["pid"] in {r["id"] for r in formal.portfolio(ctx, t["ws_cotin"])}
+        # O portfólio diz de qual espaço é cada projeto: a interface separa por área.
+        rows = {r["id"]: r for r in formal.portfolio(ctx, t["ws_cotin"])}
+        assert rows[t["pid"]]["workspace_id"] == t["ws_disid"]
+        assert rows[t["pid"]]["shared_from"] == "DISID"
         a = project_access(ctx, t["pid"])
         assert not (a.can_write or a.can_manage or a.can_comment)
         assert tasks.get_task(ctx, t["tid"])["task"]["title"] == "Homologar"

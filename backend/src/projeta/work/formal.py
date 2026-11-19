@@ -308,7 +308,7 @@ def portfolio(ctx: Ctx, workspace_id: str) -> list[dict]:
     """Projetos ativos visíveis ao usuário no espaço, com situação e frescor do acompanhamento."""
     role_in(ctx, workspace_id)
     rows = ctx.all(
-        f"""SELECT p.id, p.name, p.phase, p.approach, p.sei_process, p.summary, p.attributes, p.progress,
+        f"""SELECT p.id, p.workspace_id, p.name, p.phase, p.approach, p.sei_process, p.summary, p.attributes, p.progress,
           (SELECT count(*)::int FROM tasks t WHERE t.project_id = p.id) AS task_count,
           (SELECT count(*)::int FROM tasks t WHERE t.project_id = p.id
              AND t.status = 'done') AS done_count,

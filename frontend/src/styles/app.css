@@ -274,3 +274,12 @@ button.task-tag-urgent:hover { background: #831919; color: #fff; }
   .attr-row input:nth-of-type(2) { grid-column: 1; }
   .task-row.subtask { margin-left: 14px; }
 }
+
+/* Áreas do panorama (unidades abaixo no organograma) */
+.area-tabs { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 14px; }
+.area-n { font-variant-numeric: tabular-nums; opacity: 0.75; margin-left: 4px; }
+.area-summary { margin-bottom: 16px; overflow-x: auto; }
+.area-table { width: 100%; border-collapse: collapse; margin-top: 10px; font-variant-numeric: tabular-nums; }
+.area-table th, .area-table td { padding: 8px 10px; text-align: left; border-bottom: 1px solid var(--line, rgba(127,127,127,0.2)); white-space: nowrap; }
+.area-table thead th { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.04em; opacity: 0.7; }
+.area-table td:last-child { text-align: right; }
