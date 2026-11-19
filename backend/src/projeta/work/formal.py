@@ -12,7 +12,13 @@ from psycopg.types.json import Jsonb
 
 from ..db import Ctx
 from ..errors import BadRequestError, ConflictError, ForbiddenError
-from ..identity.access import VISIBLE_PROJECT, project_access, role_in
+from ..identity.access import (
+    IN_WORKSPACE_OR_RECEIVED,
+    SHARED_FROM,
+    VISIBLE_PROJECT,
+    project_access,
+    role_in,
+)
 from .activity import log_activity
 
 PHASES = ("initiation", "planning", "execution", "monitoring", "closing")
@@ -324,9 +330,10 @@ def portfolio(ctx: Ctx, workspace_id: str) -> list[dict]:
              WHERE pt.project_id = p.id AND pt.kind = 'tap') AS tap_start,
           (SELECT pt.content->>'data_termino' FROM project_terms pt
              WHERE pt.project_id = p.id AND pt.kind = 'tap') AS tap_end,
-          p.created_at::date AS created_on
+          p.created_at::date AS created_on,
+          {SHARED_FROM}
         FROM projects p
-        WHERE p.workspace_id = %(ws)s AND p.status = 'active' AND {VISIBLE_PROJECT}
+        WHERE {IN_WORKSPACE_OR_RECEIVED} AND p.status = 'active' AND {VISIBLE_PROJECT}
         ORDER BY p.name""",
         {"ws": workspace_id, "uid": ctx.user_id},
     )

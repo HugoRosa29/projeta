@@ -59,20 +59,34 @@ def _free_email(ctx: Ctx, matricula: str, email: str, user_id: str | None) -> st
 def _join_allotment_workspace(ctx: Ctx, user_id: str, allotment: str) -> None:
     """Espaço de equipe comum da lotação: criado na primeira entrada, depois só recebe membros.
 
-    Todos entram como `manager` (membro não cria projeto, e o espaço precisa ser útil a quem
-    chega); administrar o espaço (papéis e convites) é decisão posterior, não de quem
-    chegou primeiro.
+    É o espaço oficial da unidade no organograma (`org_unit`, pela sigla da lotação; ver
+    migração 016). Quem chega entra como `manager`; se o espaço ainda não tem Gestor, quem
+    entra vira Gestor (decisão de produto: "primeiro lotado a entrar", ADR 0004). A lotação vem
+    do GIA, então ninguém se declara de outra unidade.
     """
     ctx.run(
-        "INSERT INTO workspaces(name, kind, allotment, created_by) VALUES (%s,'team',%s,%s) "
+        "INSERT INTO workspaces(name, kind, allotment, created_by, org_unit) "
+        "SELECT %s,'team',%s,%s, CASE WHEN EXISTS (SELECT 1 FROM workspaces o "
+        "  WHERE o.org_unit = projeta_unit_for_allotment(%s)) THEN NULL "
+        "  ELSE projeta_unit_for_allotment(%s) END "
         "ON CONFLICT (lower(allotment)) WHERE allotment IS NOT NULL DO NOTHING",
-        (allotment, allotment, user_id),
+        (allotment, allotment, user_id, allotment, allotment),
     )
+    ws = ctx.one(
+        "SELECT id FROM workspaces WHERE lower(allotment) = lower(%s) FOR UPDATE", (allotment,)
+    )
+    if not ws:
+        return
+    # O bloqueio da linha do espaço serializa duas primeiras entradas simultâneas.
+    has_admin = ctx.one(
+        "SELECT 1 AS x FROM workspace_members WHERE workspace_id=%s AND role='admin'", (ws["id"],)
+    )
+    role = "manager" if has_admin else "admin"
     ctx.run(
-        "INSERT INTO workspace_members(workspace_id, user_id, role) "
-        "SELECT id, %s, 'manager' FROM workspaces WHERE lower(allotment) = lower(%s) "
-        "ON CONFLICT DO NOTHING",
-        (user_id, allotment),
+        "INSERT INTO workspace_members(workspace_id, user_id, role) VALUES (%s,%s,%s) "
+        "ON CONFLICT (workspace_id, user_id) DO UPDATE SET role = "
+        "CASE WHEN EXCLUDED.role = 'admin' THEN 'admin' ELSE workspace_members.role END",
+        (ws["id"], user_id, role),
     )
 
 

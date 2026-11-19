@@ -153,3 +153,7 @@ class TermIn(BaseModel):
 
 class PermissionsIn(BaseModel):
     permissions: dict[str, list[str]]
+
+
+class ShareIn(BaseModel):
+    project_id: str = Field(max_length=64)

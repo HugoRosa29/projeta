@@ -5,9 +5,9 @@ from starlette.concurrency import run_in_threadpool
 from ...db import uow
 from ...errors import BadRequestError
 from ...identity import workspaces as svc
-from ...work import transfer
+from ...work import org, transfer
 from ..deps import current_user
-from ..schemas import InviteIn, PermissionsIn, PrefsIn, RoleIn, WorkspaceIn, WorkspacePatch
+from ..schemas import InviteIn, PermissionsIn, PrefsIn, RoleIn, ShareIn, WorkspaceIn, WorkspacePatch
 
 router = APIRouter(tags=["workspaces"])
 
@@ -114,3 +114,27 @@ async def import_(
             return transfer.import_workspace(ctx, raw, workspace_id or None, name)
 
     return await run_in_threadpool(run)
+
+
+@router.get("/workspaces/{workspace_id}/org")
+def org_view(workspace_id: str, user: dict = Depends(current_user)) -> dict:
+    with uow(user["id"]) as ctx:
+        return org.org_view(ctx, workspace_id)
+
+
+@router.post("/workspaces/{workspace_id}/org/shares", status_code=204)
+def share(workspace_id: str, body: ShareIn, user: dict = Depends(current_user)) -> None:
+    with uow(user["id"]) as ctx:
+        org.share_up(ctx, workspace_id, body.project_id)
+
+
+@router.delete("/workspaces/{workspace_id}/org/shares/{project_id}", status_code=204)
+def unshare(workspace_id: str, project_id: str, user: dict = Depends(current_user)) -> None:
+    with uow(user["id"]) as ctx:
+        org.unshare_up(ctx, workspace_id, project_id)
+
+
+@router.post("/workspaces/{workspace_id}/org/share-all")
+def share_all(workspace_id: str, user: dict = Depends(current_user)) -> dict:
+    with uow(user["id"]) as ctx:
+        return {"shared": org.share_all_up(ctx, workspace_id)}

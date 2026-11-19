@@ -4,6 +4,7 @@ import { Empty, ErrorBox, Loading, useToast } from "../../components/ui";
 import { ROLE_LABEL, can, type Member, type Permission, type Role, type Workspace } from "../../domain/types";
 import { api } from "../../services/api";
 import { useSession } from "../../app/session";
+import { OrgSection } from "./OrgSection";
 
 const TZS = ["America/Sao_Paulo", "America/Manaus", "America/Fortaleza", "America/Rio_Branco", "America/Noronha", "Europe/Lisbon", "UTC"];
 const ROLES = Object.keys(ROLE_LABEL) as Role[];
@@ -147,6 +148,8 @@ export function SettingsPage() {
           ))}
         </ul>
       </section>
+
+      {workspace.kind === "team" && <OrgSection workspaceId={workspace.id} onError={fail} onDone={(m) => toast(m)} />}
 
       {workspace.kind === "team" && <PermissionsMatrix workspaceId={workspace.id} editable={isAdmin} onSaved={done("Permissões atualizadas")} onError={fail} />}
 

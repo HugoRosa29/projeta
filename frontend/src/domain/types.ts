@@ -8,7 +8,8 @@ export type Permission =
   | "project.manage"
   | "task.write"
   | "comment.write"
-  | "workspace.invite";
+  | "workspace.invite"
+  | "org.view_shared";
 
 export const STATUSES: Status[] = ["todo", "doing", "blocked", "done"];
 export const STATUS_LABEL: Record<Status, string> = {
@@ -73,6 +74,8 @@ export interface ProjectAttribute {
   value: string;
 }
 export interface Project {
+  /** Nome do espaço de origem quando o projeto foi compartilhado com esta unidade (só leitura). */
+  shared_from?: string | null;
   summary?: string;
   responsible?: string;
   requester?: string;

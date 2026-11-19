@@ -38,7 +38,8 @@ def test_primeira_entrada_cria_conta_espaco_pessoal_e_espaco_da_lotacao(gia):
     assert user["name"] == "Ana Souza"
     assert user["email"] == "ana@terracap.df.gov.br"
     kinds = {(w["kind"], w["name"], w["role"]) for w in meus_espacos(c)}
-    assert kinds == {("personal", "Espaço de Ana", "admin"), ("team", "GETIN", "manager")}
+    # Primeira pessoa da lotação vira Gestor do espaço da unidade (ADR 0004).
+    assert kinds == {("personal", "Espaço de Ana", "admin"), ("team", "GETIN", "admin")}
 
 
 def test_chamada_ao_gia_usa_servico_sistema_e_matricula_em_maiusculas(gia):
@@ -60,6 +61,9 @@ def test_mesma_lotacao_compartilha_o_espaco_e_outra_lotacao_fica_de_fora(gia):
     ws_ana = next(w["id"] for w in meus_espacos(ana) if w["kind"] == "team")
     ws_bia = next(w["id"] for w in meus_espacos(bia) if w["kind"] == "team")
     assert ws_ana == ws_bia
+    # Só a primeira a entrar é Gestor; quem chega depois entra como Gerente de projeto.
+    assert next(w["role"] for w in meus_espacos(bia) if w["kind"] == "team") == "manager"
+    assert next(w["role"] for w in meus_espacos(entrar("a1")) if w["kind"] == "team") == "admin"
 
     with uow(NOBODY) as ctx:
         ids = {r["matricula"]: r["id"] for r in ctx.all("SELECT id, matricula FROM users")}

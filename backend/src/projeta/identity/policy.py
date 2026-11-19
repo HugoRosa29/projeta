@@ -28,11 +28,18 @@ PERMISSIONS: dict[str, str] = {
     "task.write": "Criar e editar tarefas nos projetos em que está",
     "comment.write": "Comentar tarefas nos projetos em que está",
     "workspace.invite": "Convidar pessoas para o espaço (até o próprio perfil)",
+    "org.view_shared": "Ver projetos compartilhados pelas unidades abaixo no organograma (só leitura)",
 }
 
-# Padrão de espaço novo; reproduz o comportamento anterior à matriz (migração 015).
+# Padrão de espaço novo (DEFAULT da coluna, migrações 015 e 016).
 DEFAULT_PERMISSIONS: dict[str, list[str]] = {
-    "manager": ["project.create", "project.manage", "task.write", "comment.write"],
+    "manager": [
+        "project.create",
+        "project.manage",
+        "task.write",
+        "comment.write",
+        "org.view_shared",
+    ],
     "member": ["task.write", "comment.write"],
     "viewer": [],
 }

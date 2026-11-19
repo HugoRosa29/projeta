@@ -100,6 +100,7 @@ function ProjectCard({ r }: { r: Row }) {
       <div className="pf-body">
         <h2>
           <Link to={`/projetos/${r.id}`} className="pf-link">{r.name}</Link>
+          {r.shared_from && <> <span className="badge" title="Compartilhado no organograma: só leitura">de {r.shared_from}</span></>}
         </h2>
 
         {r.phase ? (
