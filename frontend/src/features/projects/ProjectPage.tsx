@@ -9,6 +9,7 @@ import {
   PRIORITY_LABEL,
   STATUSES,
   STATUS_LABEL,
+  can,
   fmtDate,
   type ActivityItem,
   type Member,
@@ -86,7 +87,7 @@ export function ProjectPage() {
   const d = q.data!;
   const tasks = tasksQ.data?.tasks ?? [];
   const archived = d.project.status === "archived";
-  const canManageRole = d.can_manage || (archived && (workspace.role === "admin" || workspace.role === "manager"));
+  const canManageRole = d.can_manage || (archived && can(workspace, "project.manage"));
 
   return (
     <>

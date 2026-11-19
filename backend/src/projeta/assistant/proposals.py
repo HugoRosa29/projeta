@@ -16,7 +16,7 @@ from psycopg.types.json import Jsonb
 
 from ..db import Ctx
 from ..errors import BadRequestError, ForbiddenError, GoneError
-from ..identity.access import is_uuid, project_access, role_in, task_access
+from ..identity.access import is_uuid, membership, project_access, role_in, task_access
 from ..identity.policy import assert_can
 from ..settings import get_settings
 from ..work import comments, formal, projects, tasks
@@ -139,7 +139,8 @@ def _comment_preview(ctx: Ctx, p: CommentPayload) -> tuple[dict, dict]:
                 "changes": [],
             }
         ],
-        "can_write": a.can_write,
+        # Para comentário, "pode confirmar" é poder comentar (a matriz separa de editar).
+        "can_write": a.can_comment,
     }, {}
 
 
@@ -178,11 +179,14 @@ def _authorize_target(ctx: Ctx, kind: str, model: Any, workspace_id: str) -> Non
             if not project_access(ctx, model.project_id).can_write:
                 raise ForbiddenError()
         else:
-            assert_can(role_in(ctx, workspace_id), "project.create")
+            assert_can(membership(ctx, workspace_id), "project.create")
     elif kind == "status_note":
         if not project_access(ctx, model.project_id).can_manage:
             raise ForbiddenError()
-    else:  # update_task e add_comment: quem edita a tarefa
+    elif kind == "add_comment":
+        if not task_access(ctx, model.task_id).can_comment:
+            raise ForbiddenError()
+    else:  # update_task: quem edita a tarefa
         if not task_access(ctx, model.task_id).can_write:
             raise ForbiddenError()
 

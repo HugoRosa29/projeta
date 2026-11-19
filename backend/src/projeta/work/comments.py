@@ -43,7 +43,7 @@ def list_comments(ctx: Ctx, task_id: str) -> list[dict]:
 
 def add_comment(ctx: Ctx, task_id: str, body: str) -> dict:
     a = task_access(ctx, task_id)
-    if not a.can_write:
+    if not a.can_comment:
         raise ForbiddenError()
     row = ctx.one(
         "INSERT INTO task_comments(task_id, author_id, body) VALUES (%s,%s,%s) RETURNING id",
@@ -75,13 +75,13 @@ def _comment_and_task(ctx: Ctx, comment_id: str) -> tuple[dict, TaskAccess]:
     return c, task_access(ctx, str(c["task_id"]))
 
 
-def _is_author_with_write(ctx: Ctx, c: dict, a: TaskAccess) -> bool:
-    return c["author_id"] == ctx.user_id and a.can_write
+def _is_author_who_can_comment(ctx: Ctx, c: dict, a: TaskAccess) -> bool:
+    return c["author_id"] == ctx.user_id and a.can_comment
 
 
 def edit_comment(ctx: Ctx, comment_id: str, body: str) -> dict:
     c, a = _comment_and_task(ctx, comment_id)
-    if not _is_author_with_write(ctx, c, a):
+    if not _is_author_who_can_comment(ctx, c, a):
         raise ForbiddenError()
     ctx.run(
         "UPDATE task_comments SET body = %s, edited_at = now() WHERE id = %s",
@@ -94,6 +94,6 @@ def edit_comment(ctx: Ctx, comment_id: str, body: str) -> dict:
 
 def delete_comment(ctx: Ctx, comment_id: str) -> None:
     c, a = _comment_and_task(ctx, comment_id)
-    if not (_is_author_with_write(ctx, c, a) or _can_moderate(ctx, a.task)):
+    if not (_is_author_who_can_comment(ctx, c, a) or _can_moderate(ctx, a.task)):
         raise ForbiddenError()
     ctx.run("DELETE FROM task_comments WHERE id = %s", (comment_id,))

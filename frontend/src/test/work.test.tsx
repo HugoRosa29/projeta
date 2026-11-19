@@ -71,7 +71,7 @@ describe("ficha da tarefa", () => {
   function mockGet(canWrite: boolean) {
     return vi.spyOn(api, "get").mockImplementation(async (path: string) => {
       if (path.endsWith("/comments")) return { comments: [comment] };
-      return { task: mae, can_write: canWrite, depends_on: [], subtasks: [filha] };
+      return { task: mae, can_write: canWrite, can_comment: canWrite, depends_on: [], subtasks: [filha] };
     });
   }
 

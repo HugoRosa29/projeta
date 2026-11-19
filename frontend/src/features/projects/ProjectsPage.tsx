@@ -3,7 +3,7 @@ import { useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router";
 import { Skyline } from "../../components/Skyline";
 import { Dialog, Empty, ErrorBox, Loading, useToast } from "../../components/ui";
-import type { Project } from "../../domain/types";
+import { can, type Project } from "../../domain/types";
 import { api } from "../../services/api";
 import { projectProgress } from "../../domain/work";
 import { coverUrl } from "./cover";
@@ -13,7 +13,7 @@ export function ProjectsPage() {
   const { workspace } = useSession();
   const [creating, setCreating] = useState(false);
   const [archived, setArchived] = useState(false);
-  const canCreate = workspace.role === "admin" || workspace.role === "manager";
+  const canCreate = can(workspace, "project.create");
   const q = useQuery({
     queryKey: ["projects", workspace.id, archived],
     queryFn: () => api.get<{ projects: Project[] }>("/projects", { workspace_id: workspace.id, include_archived: archived }),

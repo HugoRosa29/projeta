@@ -149,3 +149,7 @@ class StatusNoteIn(BaseModel):
 class TermIn(BaseModel):
     content: dict
     expected_version: int
+
+
+class PermissionsIn(BaseModel):
+    permissions: dict[str, list[str]]
