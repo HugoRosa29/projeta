@@ -4,6 +4,9 @@ COPY pyproject.toml ./
 COPY src ./src
 RUN pip install --no-cache-dir .
 COPY scripts ./scripts
+# O pacote instalado fica em site-packages, longe de backend/migrations: o caminho vem do ambiente.
+COPY migrations ./migrations
+ENV MIGRATIONS_DIR=/app/migrations
 RUN useradd --system --uid 10001 projeta && mkdir -p var && chown projeta var
 USER projeta
 EXPOSE 8000

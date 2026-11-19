@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -21,7 +22,11 @@ logger = logging.getLogger(__name__)
 # uuid -> str em todas as conexões; evita converter cada coluna na mão.
 psycopg.adapters.register_loader("uuid", TextLoader)
 
-MIGRATIONS_DIR = Path(__file__).resolve().parents[2] / "migrations"
+# Do código-fonte (make migrate, testes) as migrações estão em backend/migrations. Instalado como
+# pacote (imagem da API), o módulo vive em site-packages e a imagem informa o caminho por ambiente.
+MIGRATIONS_DIR = Path(
+    os.environ.get("MIGRATIONS_DIR") or Path(__file__).resolve().parents[2] / "migrations"
+)
 _pool: ConnectionPool | None = None
 
 
@@ -78,7 +83,20 @@ def uow(user_id: str) -> Iterator[Ctx]:
         yield Ctx(conn, user_id)
 
 
+def migration_files() -> list[Path]:
+    """Arquivos de migração em ordem. Nenhum encontrado é erro de empacotamento, não banco novo."""
+    files = sorted(MIGRATIONS_DIR.glob("*.sql"))
+    if not files:
+        raise RuntimeError(
+            f"Nenhuma migração SQL encontrada em {MIGRATIONS_DIR}. "
+            "Confira se backend/migrations foi copiado para a imagem "
+            "ou defina MIGRATIONS_DIR com o diretório dos arquivos .sql."
+        )
+    return files
+
+
 def run_migrations(conn: psycopg.Connection) -> list[str]:
+    files = migration_files()
     conn.execute(
         "CREATE TABLE IF NOT EXISTS schema_migrations "
         "(name text PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())"
@@ -86,7 +104,7 @@ def run_migrations(conn: psycopg.Connection) -> list[str]:
     conn.execute("SELECT pg_advisory_xact_lock(727274)")  # um processo migra por vez
     done = {r["name"] for r in conn.execute("SELECT name FROM schema_migrations").fetchall()}
     applied: list[str] = []
-    for f in sorted(MIGRATIONS_DIR.glob("*.sql")):
+    for f in files:
         if f.name in done:
             continue
         conn.execute(f.read_text(encoding="utf-8"))
