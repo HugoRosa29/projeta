@@ -1,13 +1,22 @@
-"""Espaços, equipe, convites e preferências."""
+"""Espaços, equipe, convites, matriz de permissões e preferências."""
 
+import json
 from datetime import UTC, datetime, timedelta
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from ..db import Ctx
 from ..errors import BadRequestError, ConflictError, ForbiddenError, GoneError
-from .access import is_uuid, role_in
+from .access import is_uuid, membership, role_in
 from .auth import hash_token, new_token
-from .policy import ROLES, assert_can
+from .policy import (
+    CONFIGURABLE_ROLES,
+    PERMISSIONS,
+    ROLE_LABEL,
+    ROLES,
+    assert_can,
+    granted_list,
+    member,
+)
 
 
 def _check_tz(tz: str) -> None:
@@ -18,12 +27,17 @@ def _check_tz(tz: str) -> None:
 
 
 def list_my_workspaces(ctx: Ctx) -> list[dict]:
-    return ctx.all(
-        "SELECT w.id, w.name, w.kind, w.timezone, wm.role, wm.notify_email, wm.notify_inapp "
-        "FROM workspaces w JOIN workspace_members wm ON wm.workspace_id = w.id AND wm.user_id = %s "
+    rows = ctx.all(
+        "SELECT w.id, w.name, w.kind, w.timezone, wm.role, wm.notify_email, wm.notify_inapp, "
+        "w.permissions FROM workspaces w "
+        "JOIN workspace_members wm ON wm.workspace_id = w.id AND wm.user_id = %s "
         "ORDER BY (w.kind = 'personal') DESC, w.name",
         (ctx.user_id,),
     )
+    for r in rows:
+        # A interface usa a lista para esconder opções; o servidor confere de novo em cada ação.
+        r["permissions"] = granted_list(member(r["role"], r.pop("permissions")))
+    return rows
 
 
 def create_team_workspace(ctx: Ctx, name: str, timezone: str = "America/Sao_Paulo") -> dict:
@@ -47,7 +61,7 @@ def create_team_workspace(ctx: Ctx, name: str, timezone: str = "America/Sao_Paul
 def update_workspace(
     ctx: Ctx, workspace_id: str, name: str | None = None, timezone: str | None = None
 ) -> None:
-    assert_can(role_in(ctx, workspace_id), "workspace.manage")
+    assert_can(membership(ctx, workspace_id), "workspace.manage")
     if timezone:
         _check_tz(timezone)
     ctx.run(
@@ -55,6 +69,45 @@ def update_workspace(
         "WHERE id = %s",
         ((name or "").strip() or None, timezone, workspace_id),
     )
+
+
+def get_permissions(ctx: Ctx, workspace_id: str) -> dict:
+    """Qualquer membro vê a matriz: saber o que cada perfil pode fazer não é segredo."""
+    role_in(ctx, workspace_id)
+    row = ctx.one("SELECT permissions FROM workspaces WHERE id=%s", (workspace_id,))
+    assert row
+    matrix = row["permissions"] or {}
+    return {
+        "catalog": [{"id": k, "label": v} for k, v in PERMISSIONS.items()],
+        "roles": [{"id": r, "label": ROLE_LABEL[r]} for r in CONFIGURABLE_ROLES],
+        "permissions": {
+            r: [p for p in PERMISSIONS if p in matrix.get(r, [])] for r in CONFIGURABLE_ROLES
+        },
+    }
+
+
+def set_permissions(ctx: Ctx, workspace_id: str, permissions: dict[str, list[str]]) -> dict:
+    """Substitui a matriz inteira. Só o Gestor; o próprio perfil de Gestor não é configurável."""
+    assert_can(membership(ctx, workspace_id), "workspace.manage")
+    ws = ctx.one("SELECT kind FROM workspaces WHERE id=%s FOR UPDATE", (workspace_id,))
+    if ws and ws["kind"] == "personal":
+        raise BadRequestError("Espaços pessoais não têm perfis. Crie um espaço de equipe.")
+    unknown_roles = set(permissions) - set(CONFIGURABLE_ROLES)
+    if unknown_roles:
+        raise BadRequestError(
+            "Perfil inválido na matriz. Use manager, member ou viewer; o Gestor sempre pode tudo."
+        )
+    clean: dict[str, list[str]] = {}
+    for r in CONFIGURABLE_ROLES:
+        given = permissions.get(r, [])
+        if any(p not in PERMISSIONS for p in given):
+            raise BadRequestError("Permissão desconhecida. Atualize a página e tente de novo.")
+        clean[r] = [p for p in PERMISSIONS if p in given]
+    ctx.run(
+        "UPDATE workspaces SET permissions=%s::jsonb WHERE id=%s",
+        (json.dumps(clean), workspace_id),
+    )
+    return get_permissions(ctx, workspace_id)
 
 
 def list_members(ctx: Ctx, workspace_id: str) -> list[dict]:
@@ -89,7 +142,7 @@ def _member_role(ctx: Ctx, workspace_id: str, user_id: str) -> str:
 
 
 def set_member_role(ctx: Ctx, workspace_id: str, user_id: str, role: str) -> None:
-    assert_can(role_in(ctx, workspace_id), "workspace.manage")
+    assert_can(membership(ctx, workspace_id), "workspace.manage")
     if role not in ROLES:
         raise BadRequestError("Papel inválido")
     current = _member_role(ctx, workspace_id, user_id)
@@ -102,9 +155,9 @@ def set_member_role(ctx: Ctx, workspace_id: str, user_id: str, role: str) -> Non
 
 
 def remove_member(ctx: Ctx, workspace_id: str, user_id: str) -> None:
-    my_role = role_in(ctx, workspace_id)
+    me = membership(ctx, workspace_id)
     if user_id != ctx.user_id:
-        assert_can(my_role, "workspace.manage")
+        assert_can(me, "workspace.manage")
     current = _member_role(ctx, workspace_id, user_id)
     if current == "admin" and _admin_count(ctx, workspace_id) <= 1:
         raise ConflictError("O espaço precisa de ao menos um administrador")
@@ -123,16 +176,24 @@ def remove_member(ctx: Ctx, workspace_id: str, user_id: str) -> None:
     )
 
 
+def _assert_may_invite_as(me, role: str) -> None:
+    """Quem convida sem ser Gestor só concede perfil igual ou abaixo do seu, nunca o de Gestor."""
+    if role not in ROLES:
+        raise BadRequestError("Papel inválido")
+    if me.role != "admin" and (role == "admin" or not me.outranks_or_equals(role)):
+        raise ForbiddenError("Você só pode convidar com um perfil igual ou abaixo do seu.")
+
+
 def create_invitation(ctx: Ctx, workspace_id: str, email: str, role: str) -> dict:
-    assert_can(role_in(ctx, workspace_id), "workspace.manage")
+    me = membership(ctx, workspace_id)
+    assert_can(me, "workspace.invite")
     ws = ctx.one("SELECT kind FROM workspaces WHERE id=%s", (workspace_id,))
     if ws and ws["kind"] == "personal":
         raise BadRequestError("Espaços pessoais não recebem convites. Crie um espaço de equipe.")
     email = email.strip().lower()
     if "@" not in email or "." not in email.split("@")[-1]:
         raise BadRequestError("E-mail inválido")
-    if role not in ROLES:
-        raise BadRequestError("Papel inválido")
+    _assert_may_invite_as(me, role)
     token = new_token()
     expires = datetime.now(UTC) + timedelta(days=7)
     row = ctx.one(
@@ -146,19 +207,24 @@ def create_invitation(ctx: Ctx, workspace_id: str, email: str, role: str) -> dic
 
 
 def list_invitations(ctx: Ctx, workspace_id: str) -> list[dict]:
-    assert_can(role_in(ctx, workspace_id), "workspace.manage")
+    """O Gestor vê todos os convites pendentes; quem só pode convidar vê os próprios."""
+    me = membership(ctx, workspace_id)
+    assert_can(me, "workspace.invite")
     return ctx.all(
         "SELECT id, email, role, expires_at FROM invitations WHERE workspace_id=%s "
-        "AND accepted_at IS NULL AND expires_at > now() ORDER BY created_at DESC",
-        (workspace_id,),
+        "AND accepted_at IS NULL AND expires_at > now() AND (%s OR invited_by=%s) "
+        "ORDER BY created_at DESC",
+        (workspace_id, me.role == "admin", ctx.user_id),
     )
 
 
 def revoke_invitation(ctx: Ctx, workspace_id: str, invitation_id: str) -> None:
-    assert_can(role_in(ctx, workspace_id), "workspace.manage")
+    me = membership(ctx, workspace_id)
+    assert_can(me, "workspace.invite")
     if is_uuid(invitation_id):
         ctx.run(
-            "DELETE FROM invitations WHERE id=%s AND workspace_id=%s", (invitation_id, workspace_id)
+            "DELETE FROM invitations WHERE id=%s AND workspace_id=%s AND (%s OR invited_by=%s)",
+            (invitation_id, workspace_id, me.role == "admin", ctx.user_id),
         )
 
 

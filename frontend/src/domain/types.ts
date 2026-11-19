@@ -1,6 +1,14 @@
 export type Status = "todo" | "doing" | "blocked" | "done";
 export type Priority = "low" | "medium" | "high";
 export type Role = "admin" | "manager" | "member" | "viewer";
+/** Ações que o Gestor configura por perfil (identity/policy.py). O servidor confere sempre. */
+export type Permission =
+  | "project.view_all"
+  | "project.create"
+  | "project.manage"
+  | "task.write"
+  | "comment.write"
+  | "workspace.invite";
 
 export const STATUSES: Status[] = ["todo", "doing", "blocked", "done"];
 export const STATUS_LABEL: Record<Status, string> = {
@@ -11,7 +19,7 @@ export const STATUS_LABEL: Record<Status, string> = {
 };
 export const PRIORITY_LABEL: Record<Priority, string> = { low: "Baixa", medium: "Média", high: "Alta" };
 export const ROLE_LABEL: Record<Role, string> = {
-  admin: "Administrador do espaço",
+  admin: "Gestor",
   manager: "Gerente de projeto",
   member: "Membro",
   viewer: "Leitor",
@@ -29,6 +37,8 @@ export interface Workspace {
   kind: "personal" | "team";
   timezone: string;
   role: Role;
+  /** O que esta pessoa pode fazer neste espaço; só para esconder opções na interface. */
+  permissions: Permission[];
   notify_email: boolean;
   notify_inapp: boolean;
 }
@@ -129,4 +139,8 @@ export function fmtDate(d: string | null): string {
 export function isoDate(d: Date): string {
   const p = (n: number) => String(n).padStart(2, "0");
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+
+export function can(w: Pick<Workspace, "permissions">, p: Permission): boolean {
+  return w.permissions?.includes(p) ?? false;
 }

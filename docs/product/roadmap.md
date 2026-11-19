@@ -4,7 +4,7 @@ Atualizado em 09/11/2026 a partir do código disponível. O [plano original](../
 
 | Fase | Presente no código | Pendente |
 | --- | --- | --- |
-| 1 — Base | Cadastro/login, espaços, convites, papéis, projetos, tarefas pessoais e de projeto, lista, quadro, Hoje e histórico | Validação da jornada completa no navegador, inclusive 360 px |
+| 1 — Base | Cadastro/login, espaços, convites, papéis com matriz de permissões editável pelo Gestor ([ADR 0003](../adr/0003-permissoes-por-perfil.md)), projetos, tarefas pessoais e de projeto, lista, quadro, Hoje e histórico | Validação da jornada completa no navegador, inclusive 360 px |
 | 2 — Assistente | Consultas (meu dia, prazos, busca com filtros, detalhes da tarefa com comentários, portfólio, raio-x do projeto, carga por pessoa, atividade recente, parados, bloqueios), projetos e pessoas pelo nome, links, escolha entre tarefas homônimas, EAP com fases/marcos/dependências, propostas de criação, atualização (estado, prazo, progresso, prioridade, responsável) e comentário, revisão, cancelamento, confirmação e controle de versão | Propostas de lembretes, de campos do projeto (fase, % concluído, campos livres) e de TAP/TEP; teste real com o provedor; ampliar a edição dos campos da EAP |
 | 3 — Colaboração e agenda | Dependências com detecção de ciclos, marcos, calendário de prazos, cronograma, busca/filtros em partes da aplicação, comentários na tarefa e subtarefas (um nível) | Compromissos, notificações, agendador e deduplicação de lembretes, resumo diário automático |
 | 4 — Voz e estimativas | Campos manuais de estimativa e responsável | Áudio/transcrição, estimativas com evidência histórica e sugestão de responsáveis |

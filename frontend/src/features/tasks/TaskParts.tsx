@@ -122,6 +122,7 @@ export function TaskList({ tasks, today, onOpen, all }: { tasks: Task[]; today?:
 interface Detail {
   task: Task;
   can_write: boolean;
+  can_comment: boolean;
   depends_on: { id: string; title: string; status: Status }[];
   subtasks: Task[];
 }
@@ -312,7 +313,7 @@ export function TaskDialog({ taskId, members, onClose }: { taskId: string; membe
           {!d.can_write && <p className="muted" style={{ marginTop: 10 }}>Você tem acesso somente de leitura a esta tarefa.</p>}
         </form>
         {!t.parent_id && <Subtasks parent={t} items={subtasks} canWrite={d.can_write} />}
-        <Comments taskId={t.id} canWrite={d.can_write} />
+        <Comments taskId={t.id} canWrite={d.can_comment} />
         </>
       )}
     </Dialog>

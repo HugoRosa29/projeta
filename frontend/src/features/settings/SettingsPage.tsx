@@ -1,18 +1,26 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
 import { Empty, ErrorBox, Loading, useToast } from "../../components/ui";
-import { ROLE_LABEL, type Member, type Role } from "../../domain/types";
+import { ROLE_LABEL, can, type Member, type Permission, type Role } from "../../domain/types";
 import { api } from "../../services/api";
 import { useSession } from "../../app/session";
 
 const TZS = ["America/Sao_Paulo", "America/Manaus", "America/Fortaleza", "America/Rio_Branco", "America/Noronha", "Europe/Lisbon", "UTC"];
 const ROLES = Object.keys(ROLE_LABEL) as Role[];
+const RANK: Record<Role, number> = { viewer: 0, member: 1, manager: 2, admin: 3 };
+
+/** Perfis que quem convida pode conceder; o servidor aplica a mesma regra. */
+export function invitableRoles(mine: Role): Role[] {
+  return mine === "admin" ? ROLES : ROLES.filter((r) => r !== "admin" && RANK[r] <= RANK[mine]);
+}
 
 export function SettingsPage() {
   const { workspace, workspaces, user, setWorkspaceId, refresh } = useSession();
   const qc = useQueryClient();
   const toast = useToast();
   const isAdmin = workspace.role === "admin";
+  const canInvite = workspace.kind === "team" && can(workspace, "workspace.invite");
+  const inviteRoles = invitableRoles(workspace.role);
   const done = (msg: string) => () => (refresh(), qc.invalidateQueries({ queryKey: ["ws"] }), toast(msg));
   const fail = (e: unknown) => toast((e as Error).message);
 
@@ -20,7 +28,7 @@ export function SettingsPage() {
   const invites = useQuery({
     queryKey: ["ws", "invites", workspace.id],
     queryFn: () => api.get<{ invitations: { id: string; email: string; role: Role; expires_at: string }[] }>(`/workspaces/${workspace.id}/invitations`),
-    enabled: isAdmin && workspace.kind === "team",
+    enabled: canInvite,
   });
 
   const [teamName, setTeamName] = useState("");
@@ -34,7 +42,7 @@ export function SettingsPage() {
   const setRole = useMutation({ mutationFn: (v: { id: string; role: Role }) => api.patch(`/workspaces/${workspace.id}/members/${v.id}`, { role: v.role }), onSuccess: done("Papel atualizado"), onError: fail });
   const remove = useMutation({ mutationFn: (id: string) => api.del(`/workspaces/${workspace.id}/members/${id}`), onSuccess: done("Pessoa removida"), onError: fail });
   const [invEmail, setInvEmail] = useState("");
-  const [invRole, setInvRole] = useState<Role>("member");
+  const [invRole, setInvRole] = useState<Role>(inviteRoles.includes("member") ? "member" : inviteRoles[0]);
   const [link, setLink] = useState<string | null>(null);
   const invite = useMutation({
     mutationFn: () => api.post<{ token: string }>(`/workspaces/${workspace.id}/invitations`, { email: invEmail, role: invRole }),
@@ -127,14 +135,16 @@ export function SettingsPage() {
         </ul>
       </section>
 
-      {isAdmin && workspace.kind === "team" && (
+      {workspace.kind === "team" && <PermissionsMatrix workspaceId={workspace.id} editable={isAdmin} onSaved={done("Permissões atualizadas")} onError={fail} />}
+
+      {canInvite && (
         <section className="card">
           <h2>Convites</h2>
           <form className="row" style={{ marginTop: 12 }} onSubmit={(e: FormEvent) => (e.preventDefault(), invite.mutate())}>
             <label className="sr-only" htmlFor="inv-email">E-mail</label>
             <input id="inv-email" className="input grow" type="email" required placeholder="email@pessoa.com" value={invEmail} onChange={(e) => setInvEmail(e.target.value)} />
             <select className="select grow" aria-label="Papel do convidado" value={invRole} onChange={(e) => setInvRole(e.target.value as Role)}>
-              {ROLES.map((r) => <option key={r} value={r}>{ROLE_LABEL[r]}</option>)}
+              {inviteRoles.map((r) => <option key={r} value={r}>{ROLE_LABEL[r]}</option>)}
             </select>
             <button className="btn btn-primary">Convidar</button>
           </form>
@@ -157,5 +167,72 @@ export function SettingsPage() {
         </section>
       )}
     </>
+  );
+}
+
+interface Matrix {
+  catalog: { id: Permission; label: string }[];
+  roles: { id: Exclude<Role, "admin">; label: string }[];
+  permissions: Record<Exclude<Role, "admin">, Permission[]>;
+}
+
+/** O Gestor marca o que cada perfil pode fazer; os demais veem a mesma tabela só para leitura. */
+export function PermissionsMatrix({ workspaceId, editable, onSaved, onError }: { workspaceId: string; editable: boolean; onSaved: () => void; onError: (e: unknown) => void }) {
+  const q = useQuery({ queryKey: ["ws", "permissions", workspaceId], queryFn: () => api.get<Matrix>(`/workspaces/${workspaceId}/permissions`) });
+  const [draft, setDraft] = useState<Matrix["permissions"] | null>(null);
+  const save = useMutation({
+    mutationFn: (permissions: Matrix["permissions"]) => api.put<Matrix>(`/workspaces/${workspaceId}/permissions`, { permissions }),
+    onSuccess: () => (setDraft(null), onSaved()),
+    onError,
+  });
+  if (q.isLoading) return <section className="card"><h2>Perfis e permissões</h2><Loading /></section>;
+  if (q.isError) return <section className="card"><h2>Perfis e permissões</h2><ErrorBox error={q.error} onRetry={() => q.refetch()} /></section>;
+  const m = q.data!;
+  const current = draft ?? m.permissions;
+  const toggle = (role: keyof Matrix["permissions"], p: Permission, on: boolean) =>
+    setDraft({ ...current, [role]: on ? [...current[role], p] : current[role].filter((x) => x !== p) });
+
+  return (
+    <section className="card">
+      <h2>Perfis e permissões</h2>
+      <p className="muted" style={{ marginTop: 6 }}>
+        {editable ? "Marque o que cada perfil pode fazer neste espaço." : "O que cada perfil pode fazer neste espaço. Só o Gestor altera."} O Gestor sempre pode tudo.
+      </p>
+      <div style={{ overflowX: "auto", marginTop: 12 }}>
+        <table className="perm-table" style={{ width: "100%", borderCollapse: "collapse" }}>
+          <thead>
+            <tr>
+              <th scope="col" style={{ textAlign: "left" }}>Permissão</th>
+              {m.roles.map((r) => <th key={r.id} scope="col">{r.label}</th>)}
+            </tr>
+          </thead>
+          <tbody>
+            {m.catalog.map((p) => (
+              <tr key={p.id}>
+                <th scope="row" style={{ textAlign: "left", fontWeight: 400, padding: "6px 8px 6px 0" }}>{p.label}</th>
+                {m.roles.map((r) => (
+                  <td key={r.id} style={{ textAlign: "center" }}>
+                    <input
+                      type="checkbox"
+                      className="check"
+                      aria-label={`${r.label}: ${p.label}`}
+                      checked={current[r.id].includes(p.id)}
+                      disabled={!editable || save.isPending}
+                      onChange={(e) => toggle(r.id, p.id, e.target.checked)}
+                    />
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {editable && draft && (
+        <div className="row" style={{ marginTop: 12, gap: 8 }}>
+          <button className="btn btn-primary" disabled={save.isPending} onClick={() => save.mutate(draft)}>Salvar permissões</button>
+          <button className="btn btn-ghost" onClick={() => setDraft(null)}>Descartar</button>
+        </div>
+      )}
+    </section>
   );
 }

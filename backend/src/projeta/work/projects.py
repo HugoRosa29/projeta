@@ -2,7 +2,7 @@ from psycopg.types.json import Jsonb
 
 from ..db import Ctx
 from ..errors import BadRequestError, ForbiddenError
-from ..identity.access import VISIBLE_PROJECT, project_access, role_in
+from ..identity.access import VISIBLE_PROJECT, membership, project_access, role_in
 from ..identity.policy import assert_can
 from .activity import log_activity
 from .formal import PHASES
@@ -86,7 +86,7 @@ def create_project(
     external_ref: str = "",
     attributes: list[dict] | None = None,
 ) -> dict:
-    assert_can(role_in(ctx, workspace_id), "project.create")
+    assert_can(membership(ctx, workspace_id), "project.create")
     attrs = clean_attributes(attributes) or []
     name = name.strip()
     if len(name) < 2:
@@ -160,6 +160,7 @@ def get_project(ctx: Ctx, project_id: str) -> dict:
         "project": {**a.project, "cover_version": cover["updated_at"] if cover else None},
         "can_write": a.can_write,
         "can_manage": a.can_manage,
+        "can_comment": a.can_comment,
         "members": members,
         "stats": {r["status"]: r["n"] for r in stats},
         "activity": activity,
@@ -186,11 +187,8 @@ def update_project(
     """Campos nulos não mudam. `clear_progress` volta o percentual a ser calculado pelas tarefas."""
     a = project_access(ctx, project_id, lock=True)
     # Reativar um projeto arquivado também é gestão: não depende de can_manage (exige ativo).
-    assert_can(a.role, "project.manage")
-    if a.role != "admin" and not ctx.one(
-        "SELECT 1 AS x FROM project_members WHERE project_id=%s AND user_id=%s",
-        (project_id, ctx.user_id),
-    ):
+    assert_can(a.member, "project.manage")
+    if not a.linked:
         raise ForbiddenError()
     if status is not None and status not in ("active", "archived"):
         raise BadRequestError("Status inválido")

@@ -258,7 +258,13 @@ def get_task(ctx: Ctx, task_id: str) -> dict:
     subtasks = ctx.all(
         f"{TASK_SELECT} WHERE t.parent_id = %s ORDER BY t.position, t.created_at", (task_id,)
     )
-    return {"task": a.task, "can_write": a.can_write, "depends_on": deps, "subtasks": subtasks}
+    return {
+        "task": a.task,
+        "can_write": a.can_write,
+        "can_comment": a.can_comment,
+        "depends_on": deps,
+        "subtasks": subtasks,
+    }
 
 
 def update_task(

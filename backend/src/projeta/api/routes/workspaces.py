@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends
 from ...db import uow
 from ...identity import workspaces as svc
 from ..deps import current_user
-from ..schemas import InviteIn, PrefsIn, RoleIn, WorkspaceIn, WorkspacePatch
+from ..schemas import InviteIn, PermissionsIn, PrefsIn, RoleIn, WorkspaceIn, WorkspacePatch
 
 router = APIRouter(tags=["workspaces"])
 
@@ -18,6 +18,20 @@ def create(body: WorkspaceIn, user: dict = Depends(current_user)) -> dict:
 def patch(workspace_id: str, body: WorkspacePatch, user: dict = Depends(current_user)) -> None:
     with uow(user["id"]) as ctx:
         svc.update_workspace(ctx, workspace_id, body.name, body.timezone)
+
+
+@router.get("/workspaces/{workspace_id}/permissions")
+def permissions(workspace_id: str, user: dict = Depends(current_user)) -> dict:
+    with uow(user["id"]) as ctx:
+        return svc.get_permissions(ctx, workspace_id)
+
+
+@router.put("/workspaces/{workspace_id}/permissions")
+def set_permissions(
+    workspace_id: str, body: PermissionsIn, user: dict = Depends(current_user)
+) -> dict:
+    with uow(user["id"]) as ctx:
+        return svc.set_permissions(ctx, workspace_id, body.permissions)
 
 
 @router.get("/workspaces/{workspace_id}/members")
