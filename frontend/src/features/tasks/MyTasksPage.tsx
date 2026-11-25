@@ -59,7 +59,7 @@ export function MyTasksPage() {
       {q.data && (q.data.tasks.length === 0 ? (
         <Empty title={filtered ? "Nenhuma tarefa com esses filtros" : "Você está em dia"}>{filtered ? "Ajuste os filtros para ver mais." : "Crie uma tarefa pessoal acima."}</Empty>
       ) : (
-        <TaskList tasks={q.data.tasks} today={q.data.today} onOpen={setOpen} quick />
+        <TaskList tasks={q.data.tasks} today={q.data.today} onOpen={setOpen} quick dependencies={{ canWrite: false }} />
       ))}
       {open && <TaskDialog taskId={open} onClose={closeTask} />}
     </>

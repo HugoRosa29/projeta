@@ -53,7 +53,13 @@ TASK_SELECT = """SELECT t.id, t.workspace_id, t.project_id, t.owner_id, t.title,
   t.parent_id, pt.title AS parent_title, p.name AS project_name, au.name AS assignee_name,
   t.sprint_id, spr.name AS sprint_name, spr.status AS sprint_status,
   ARRAY(SELECT dep.depends_on_id::text FROM task_dependencies dep WHERE dep.task_id = t.id
-        ORDER BY dep.depends_on_id) AS depends_on_ids
+        ORDER BY dep.depends_on_id) AS depends_on_ids,
+  (SELECT COALESCE(json_agg(json_build_object('id', dt.id, 'title', dt.title, 'status', dt.status,
+          'due_date', dt.due_date) ORDER BY dt.due_date NULLS LAST, dt.title), '[]'::json)
+     FROM task_dependencies dep JOIN tasks dt ON dt.id = dep.depends_on_id
+     WHERE dep.task_id = t.id AND dt.status <> 'done') AS waiting_on,
+  (SELECT count(*) FROM task_dependencies dep JOIN tasks dt ON dt.id = dep.task_id
+     WHERE dep.depends_on_id = t.id AND dt.status <> 'done')::int AS blocking_count
   FROM tasks t LEFT JOIN projects p ON p.id = t.project_id LEFT JOIN users au ON au.id = t.assignee_id
   LEFT JOIN tasks pt ON pt.id = t.parent_id LEFT JOIN sprints spr ON spr.id = t.sprint_id"""
 

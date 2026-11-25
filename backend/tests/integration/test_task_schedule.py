@@ -2,6 +2,7 @@
 
 import pytest
 
+from projeta import db
 from projeta.db import uow
 from projeta.errors import BadRequestError, ForbiddenError
 from projeta.work import tasks
@@ -93,3 +94,136 @@ def test_dependencia_exige_escrita_e_acesso_as_duas_tarefas(setup):
         tasks.add_dependency(ctx, alheia["id"], a["id"])
     with uow(s["membro"]["id"]) as ctx, pytest.raises(ForbiddenError):
         tasks.add_dependency(ctx, a["id"], alheia["id"])
+
+
+def _dates(ctx, tid: str) -> tuple[str | None, str | None]:
+    t = tasks.get_task(ctx, tid)["task"]
+    return t["start_date"], t["due_date"]
+
+
+def test_ligar_dependencia_encadeia_inicio_mantendo_a_duracao(setup):
+    s = setup
+    with uow(s["membro"]["id"]) as ctx:
+        a = tasks.create_task(
+            ctx,
+            s["ws"],
+            s["pid"],
+            {"title": "A", "start_date": "2026-12-01", "due_date": "2026-12-05"},
+        )
+        b = tasks.create_task(
+            ctx,
+            s["ws"],
+            s["pid"],
+            {"title": "B", "start_date": "2026-12-01", "due_date": "2026-12-03"},
+        )
+        tasks.add_dependency(ctx, b["id"], a["id"])
+        # B começa no dia seguinte ao prazo de A e mantém os 2 dias de duração.
+        assert _dates(ctx, b["id"]) == ("2026-12-06", "2026-12-08")
+
+
+def test_mudar_prazo_da_anterior_move_a_cadeia_inteira(setup):
+    s = setup
+    with uow(s["membro"]["id"]) as ctx:
+        a = tasks.create_task(ctx, s["ws"], s["pid"], {"title": "A", "due_date": "2026-12-05"})
+        b = tasks.create_task(
+            ctx,
+            s["ws"],
+            s["pid"],
+            {"title": "B", "start_date": "2026-12-06", "due_date": "2026-12-10"},
+        )
+        c = tasks.create_task(ctx, s["ws"], s["pid"], {"title": "C", "due_date": "2026-12-20"})
+        tasks.add_dependency(ctx, b["id"], a["id"])
+        tasks.add_dependency(ctx, c["id"], b["id"])
+        assert _dates(ctx, c["id"]) == ("2026-12-11", "2026-12-20")
+        a = tasks.get_task(ctx, a["id"])["task"]
+        tasks.update_task(ctx, a["id"], {"due_date": "2026-12-08"}, a["version"])
+        assert _dates(ctx, b["id"]) == ("2026-12-09", "2026-12-13")
+        assert _dates(ctx, c["id"]) == ("2026-12-14", "2026-12-23")
+        # Antecipar também puxa a cadeia de volta.
+        a = tasks.get_task(ctx, a["id"])["task"]
+        tasks.update_task(ctx, a["id"], {"due_date": "2026-12-02"}, a["version"])
+        assert _dates(ctx, b["id"]) == ("2026-12-03", "2026-12-07")
+        kinds = ctx.all(
+            "SELECT kind, data->>'after' AS after FROM activity WHERE task_id=%s ORDER BY created_at",
+            (b["id"],),
+        )
+        assert {"kind": "task.rescheduled", "after": "A"} in kinds
+
+
+def test_varias_anteriores_vale_a_que_termina_por_ultimo(setup):
+    s = setup
+    with uow(s["membro"]["id"]) as ctx:
+        a = tasks.create_task(ctx, s["ws"], s["pid"], {"title": "A", "due_date": "2026-12-05"})
+        b = tasks.create_task(ctx, s["ws"], s["pid"], {"title": "B", "due_date": "2026-12-09"})
+        c = tasks.create_task(ctx, s["ws"], s["pid"], {"title": "C"})
+        tasks.add_dependency(ctx, c["id"], a["id"])
+        tasks.add_dependency(ctx, c["id"], b["id"])
+        assert _dates(ctx, c["id"]) == ("2026-12-10", None)
+        tasks.remove_dependency(ctx, c["id"], b["id"])
+        assert _dates(ctx, c["id"]) == ("2026-12-06", None)
+        # Sem anteriores, a data fica onde estava e volta a ser livre.
+        tasks.remove_dependency(ctx, c["id"], a["id"])
+        c = tasks.get_task(ctx, c["id"])["task"]
+        assert c["start_date"] == "2026-12-06"
+        c = tasks.update_task(ctx, c["id"], {"start_date": "2026-12-01"}, c["version"])
+        assert c["start_date"] == "2026-12-01"
+
+
+def test_inicio_encadeado_nao_se_edita_a_mao(setup):
+    s = setup
+    with uow(s["membro"]["id"]) as ctx:
+        a = tasks.create_task(ctx, s["ws"], s["pid"], {"title": "A", "due_date": "2026-12-05"})
+        b = tasks.create_task(ctx, s["ws"], s["pid"], {"title": "B", "due_date": "2026-12-10"})
+        tasks.add_dependency(ctx, b["id"], a["id"])
+        b = tasks.get_task(ctx, b["id"])["task"]
+    with (
+        uow(s["membro"]["id"]) as ctx,
+        pytest.raises(BadRequestError, match="segue as dependências"),
+    ):
+        tasks.update_task(ctx, b["id"], {"start_date": "2026-12-01"}, b["version"])
+    # O prazo continua livre, desde que não fique antes do início encadeado.
+    with uow(s["membro"]["id"]) as ctx, pytest.raises(BadRequestError, match="início"):
+        tasks.update_task(ctx, b["id"], {"due_date": "2026-12-04"}, b["version"])
+
+
+def test_minhas_tarefas_mostram_o_que_aguardam_e_quantas_esperam(setup):
+    s = setup
+    with uow(s["gp"]["id"]) as ctx:
+        a = tasks.create_task(
+            ctx, s["ws"], s["pid"], {"title": "Contratar", "due_date": "2026-12-05"}
+        )
+        b = tasks.create_task(
+            ctx, s["ws"], s["pid"], {"title": "Implantar", "assignee_id": s["membro"]["id"]}
+        )
+        tasks.add_dependency(ctx, b["id"], a["id"])
+        a = tasks.update_task(ctx, a["id"], {"assignee_id": s["membro"]["id"]}, None)
+    with uow(s["membro"]["id"]) as ctx:
+        rows = {t["title"]: t for t in tasks.list_my_tasks(ctx, s["ws"], "2026-11-25")}
+    assert rows["Implantar"]["waiting_on"] == [
+        {"id": a["id"], "title": "Contratar", "status": "todo", "due_date": "2026-12-05"}
+    ]
+    assert rows["Contratar"]["blocking_count"] == 1 and rows["Contratar"]["waiting_on"] == []
+
+
+def test_migracao_encadeia_dependencias_antigas(setup):
+    """Dependências gravadas antes da regra (ex.: EAP aplicada antes) ganham as datas encadeadas."""
+    s = setup
+    sql = (db.MIGRATIONS_DIR / "022_chain_existing_dependencies.sql").read_text(encoding="utf-8")
+    with uow(s["membro"]["id"]) as ctx:
+        a = tasks.create_task(ctx, s["ws"], s["pid"], {"title": "A", "due_date": "2026-12-05"})
+        b = tasks.create_task(
+            ctx,
+            s["ws"],
+            s["pid"],
+            {"title": "B", "start_date": "2026-12-01", "due_date": "2026-12-03"},
+        )
+        c = tasks.create_task(ctx, s["ws"], s["pid"], {"title": "C", "due_date": "2026-12-04"})
+        # Como era antes: a ligação existe, as datas não seguem.
+        ctx.run(
+            "INSERT INTO task_dependencies(task_id, depends_on_id) VALUES (%s,%s), (%s,%s)",
+            (b["id"], a["id"], c["id"], b["id"]),
+        )
+        ctx.run(sql)
+        assert _dates(ctx, b["id"]) == ("2026-12-06", "2026-12-08")  # mantém 2 dias
+        assert _dates(ctx, c["id"]) == ("2026-12-09", "2026-12-09")  # sem início: não inverte
+        assert _dates(ctx, a["id"]) == (None, "2026-12-05")

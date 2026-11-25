@@ -128,7 +128,7 @@ export function ProjectPage() {
             </Link>
           ))}
         </nav>
-        {d.can_write && view !== "visao" && <QuickAdd workspaceId={d.project.workspace_id} projectId={id} placeholder="Nova tarefa neste projeto…" />}
+        {d.can_write && view !== "visao" && <QuickAdd workspaceId={d.project.workspace_id} projectId={id} tasks={tasks} placeholder="Nova tarefa neste projeto…" />}
       </div>
 
       <div className={`project-view pv-${view}`}>

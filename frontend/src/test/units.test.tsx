@@ -31,6 +31,23 @@ describe("cliente da API", () => {
   });
 });
 
+describe("stream NDJSON do assistente", () => {
+  const ndjson = (...chunks: string[]) =>
+    new Response(new ReadableStream({ start(c) { for (const x of chunks) c.enqueue(new TextEncoder().encode(x)); c.close(); } }), { status: 200 });
+
+  it("entrega eventos mesmo com linhas partidas entre pedaços e devolve o final", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(ndjson('{"type":"delta","text":"Ol', 'á"}\n{"type":"done","x":1}\n'));
+    const seen: unknown[] = [];
+    const last = await api.stream("/assistant/chat/stream", {}, (e) => seen.push(e));
+    expect(seen).toEqual([{ type: "delta", text: "Olá" }, { type: "done", x: 1 }]);
+    expect(last).toEqual({ type: "done", x: 1 });
+  });
+  it("transforma evento de erro no meio do stream em ApiError", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(ndjson('{"type":"error","code":"upstream_unavailable","message":"Indisponível"}\n'));
+    await expect(api.stream("/x", {}, () => {})).rejects.toMatchObject({ code: "upstream_unavailable", message: "Indisponível" });
+  });
+});
+
 describe("Dialog", () => {
   it("fica fora de ancestrais transformados e restaura a rolagem ao fechar", () => {
     const previous = document.body.style.overflow;

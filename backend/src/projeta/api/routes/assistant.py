@@ -1,4 +1,9 @@
+import json
+from collections.abc import Iterator
+
 from fastapi import APIRouter, Depends
+from fastapi.encoders import jsonable_encoder
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from ...assistant import proposals, service
@@ -28,6 +33,26 @@ class EditIn(BaseModel):
 @router.post("/chat")
 def chat(body: ChatIn, user: dict = Depends(current_user)) -> dict:
     return service.chat(user, body.workspace_id, body.project_id, body.message)
+
+
+@router.post("/chat/stream")
+def chat_stream(body: ChatIn, user: dict = Depends(current_user)) -> StreamingResponse:
+    """Mesma rodada de /chat, entregue como NDJSON: uma linha JSON por evento.
+
+    Validação, permissão e limite rodam antes do stream abrir, então falham com o HTTP de sempre.
+    """
+    turn = service.start_chat(user, body.workspace_id, body.project_id, body.message)
+
+    def lines() -> Iterator[str]:
+        for ev in service.stream_reply(turn):
+            yield json.dumps(jsonable_encoder(ev), ensure_ascii=False) + "\n"
+
+    return StreamingResponse(
+        lines(),
+        media_type="application/x-ndjson",
+        # Sem buffer no caminho (nginx) e sem cache: cada linha chega quando é gerada.
+        headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"},
+    )
 
 
 @router.post("/resolve")

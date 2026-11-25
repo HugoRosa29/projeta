@@ -5,6 +5,9 @@ visibilidade (`VISIBLE_PROJECT`, `project_access`, `task_access`) usados pela in
 
 Saídas são enxutas (limites de itens e de texto) e conteúdo escrito por pessoas (títulos,
 descrições, comentários, campos livres) é devolvido dentro de campos de dados — nunca como instrução.
+
+Latência: cada saída é reenviada ao modelo a cada rodada seguinte, então só vai o que ele usa para
+raciocinar. Links não vão ao modelo — `Session.link` os guarda e a interface os mostra como botões.
 """
 
 from __future__ import annotations
@@ -12,6 +15,7 @@ from __future__ import annotations
 import unicodedata
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
+from functools import lru_cache
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field, ValidationError
@@ -94,7 +98,6 @@ def _task_item(s: Session, t: dict) -> dict:
         "prazo": t["due_date"],
         "projeto": _clip(t["project_name"], 60) if t["project_name"] else "pessoal",
         "responsavel": t["assignee_name"],
-        "link": href,
     }
     if t.get("progress"):
         item["progresso"] = t["progress"]
@@ -580,7 +583,6 @@ def tool_portfolio(s: Session, a: PortfolioArgs) -> dict:
             "em_andamento": r["doing_count"],
             "atrasadas": r["overdue_count"],
             "bloqueadas": r["blocked_count"],
-            "link": href,
         }
         if r["phase"]:
             item["fase"] = formal.PHASE_LABEL.get(r["phase"], r["phase"])
@@ -682,7 +684,6 @@ def tool_stalled_projects(s: Session, a: StalledArgs) -> dict:
             {
                 "projeto": _clip(r["name"], 80),
                 "ultima_atividade": r["last_activity"].isoformat(),
-                "link": href,
             }
         )
     return {
@@ -766,7 +767,6 @@ def tool_project_summary(s: Session, a: ProjectArg) -> dict:
     return {
         "projeto": _clip(p["name"], 80),
         "id": pid,
-        "link": f"/projetos/{pid}",
         "situacao_cadastro": p["status"],
         "hoje": today,
         "pode_editar_tarefas": detail["can_write"],
@@ -985,7 +985,7 @@ TOOLS: list[Tool] = [
     ),
     Tool(
         "tasks_due",
-        "Lista tarefas em aberto com prazo no período (padrão: hoje), com links. Use para 'o que vence hoje/nesta semana'.",
+        "Lista tarefas em aberto com prazo no período (padrão: hoje). Use para 'o que vence hoje/nesta semana'.",
         TasksDueArgs,
         tool_tasks_due,
     ),
@@ -1070,18 +1070,71 @@ TOOLS: list[Tool] = [
 ]
 BY_NAME = {t.name: t for t in TOOLS}
 
+# O que a interface mostra enquanto a ferramenta roda (texto fixo: nada dos argumentos).
+STATUS_LABEL = {
+    "my_day": "Consultando sua agenda",
+    "tasks_due": "Consultando prazos",
+    "find_tasks": "Buscando tarefas",
+    "task_details": "Abrindo a tarefa",
+    "portfolio": "Analisando o portfólio",
+    "project_summary": "Analisando o projeto",
+    "workload": "Calculando a carga da equipe",
+    "recent_activity": "Lendo a atividade recente",
+    "stalled_projects": "Procurando projetos parados",
+    "blockers": "Verificando bloqueios",
+    "propose_create_tasks": "Preparando a proposta",
+    "propose_update_task": "Preparando a proposta",
+    "propose_add_comment": "Preparando a proposta",
+    "propose_status_note": "Preparando a nota semanal",
+    "propose_wbs": "Montando a EAP",
+}
 
-def tool_specs() -> list[dict]:
-    return [
+
+def status_label(name: str) -> str:
+    return STATUS_LABEL.get(name, "Consultando")
+
+
+def _slim_schema(node: Any) -> Any:
+    """Esquema JSON sem o ruído do Pydantic (títulos, `default: null`, `anyOf [X, null]`).
+
+    Vai ao provedor em toda chamada; o significado não muda porque o modo não é estrito e a
+    validação de verdade é o `model_validate` em `execute`.
+    """
+    if isinstance(node, list):
+        return [_slim_schema(x) for x in node]
+    if not isinstance(node, dict):
+        return node
+    out = {
+        k: _slim_schema(v)
+        for k, v in node.items()
+        if k != "title" and not (k == "default" and v is None)
+    }
+    any_of = out.get("anyOf")
+    if isinstance(any_of, list):
+        rest = [x for x in any_of if x != {"type": "null"}]
+        if len(rest) == 1 and len(rest) < len(any_of):
+            del out["anyOf"]
+            out = {**rest[0], **out}
+    return out
+
+
+@lru_cache(maxsize=1)
+def _specs() -> tuple[dict, ...]:
+    return tuple(
         {
             "type": "function",
             "name": t.name,
             "description": t.description,
-            "parameters": t.args.model_json_schema(),
+            "parameters": _slim_schema(t.args.model_json_schema()),
             "strict": False,
         }
         for t in TOOLS
-    ]
+    )
+
+
+def tool_specs() -> list[dict]:
+    # Calculado uma vez por processo e idêntico a cada chamada (favorece o cache de prompt).
+    return [dict(x) for x in _specs()]
 
 
 def execute(s: Session, name: str, raw_args: dict) -> dict:

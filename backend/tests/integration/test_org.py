@@ -1,8 +1,11 @@
 """Organograma: espaço da lotação = unidade; projetos sobem um nível por vez, sempre só leitura."""
 
+from pathlib import Path
+
 import pytest
 
 from helpers import NOBODY, make_project, make_team, make_user
+from projeta import db
 from projeta.db import uow
 from projeta.errors import BadRequestError, ForbiddenError
 from projeta.identity import auth, workspaces
@@ -17,6 +20,9 @@ HEADS = {
     "COINT": "Luiz Cláudio de Freitas",
     "GEPES": "Juracir Santos Júnior",
 }
+
+
+MIGRATIONS = Path(__file__).resolve().parents[2] / "migrations"
 
 
 def _unit_ws(user: dict) -> str:
@@ -168,13 +174,48 @@ def test_compartilhar_todos(org_tree):
     assert {c["sigla"] for c in v["children"]} == {"DIGTI", "DISEG", "DISID", "DIRAU"}
 
 
-def test_mesma_unidade_com_lotacao_escrita_diferente_nao_vira_segundo_espaco_oficial():
+def test_mesma_sigla_com_lotacao_escrita_diferente_cai_no_mesmo_espaco_oficial():
     a = make_user("um", allotment="DISEG")
     b = make_user("dois", allotment="COTIN/DISEG")
+    # Formato que o GIA devolve em produção: sigla, sigla de novo e o nome por extenso.
+    c = make_user("tres", allotment="DISEG - DISEG - DIVISÃO DE SEGURANÇA DA INFORMAÇÃO")
+    assert _unit_ws(a) == _unit_ws(b) == _unit_ws(c)
+    with uow(c["id"]) as ctx:
+        assert org.org_view(ctx, _unit_ws(c))["unit"] == "DISEG"
+
+
+def test_lotacao_do_gia_por_extenso_vincula_o_titular_a_unidade():
+    lotado = make_user("dirau2", allotment="DIRAU")
+    titular = make_user(
+        "dirau1",
+        allotment="DIRAU - DIRAU - DIVISÃO DE INFRAESTRUT DE REDES E ATEND AO USUARIO",
+        full_name=HEADS["DIRAU"],
+    )
+    ws = _unit_ws(lotado)
+    assert _role(titular, ws) == "admin"
+    assert _role(lotado, ws) == "manager"
+
+
+def test_lotacao_sem_sigla_conhecida_fica_fora_da_organizacao():
+    a = make_user("um", allotment="SETOR INEXISTENTE")
+    b = make_user("dois", allotment="setor inexistente")
+    assert _unit_ws(a) == _unit_ws(b)
     with uow(a["id"]) as ctx:
-        assert org.org_view(ctx, _unit_ws(a))["unit"] == "DISEG"
-    with uow(b["id"]) as ctx:
-        assert org.org_view(ctx, _unit_ws(b))["unit"] is None
+        assert org.org_view(ctx, _unit_ws(a))["unit"] is None
+
+
+def test_migracao_vincula_quem_ja_tinha_conta_sem_novo_login():
+    lotado = make_user("dirau2", allotment="DIRAU")
+    ws = _unit_ws(lotado)
+    titular = make_user("dirau1", allotment="DIRAU", full_name=HEADS["DIRAU"])
+    # Simula a conta de antes da correção: lotada na DIRAU, mas fora do espaço oficial.
+    with uow(NOBODY) as ctx:
+        ctx.run("DELETE FROM workspace_members WHERE workspace_id = %s", (ws,))
+    sql = (MIGRATIONS / "023_link_existing_users_to_unit.sql").read_text(encoding="utf-8")
+    with db.transaction() as conn:
+        conn.execute(sql)
+    assert _role(lotado, ws) == "manager"
+    assert _role(titular, ws) == "admin"
 
 
 def test_membro_de_outro_espaco_nao_le_a_organizacao(org_tree):

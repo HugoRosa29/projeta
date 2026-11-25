@@ -3,18 +3,22 @@
 from __future__ import annotations
 
 import logging
+import queue
+import threading
 import time
+from collections.abc import Iterator
+from dataclasses import dataclass
 from typing import Any
 
 from psycopg.types.json import Jsonb
 
 from ..db import Ctx, uow
-from ..errors import BadRequestError, ForbiddenError, RateLimitError, UpstreamError
+from ..errors import AppError, BadRequestError, ForbiddenError, RateLimitError, UpstreamError
 from ..identity.access import is_uuid, project_access, role_in
 from ..settings import get_settings
 from ..work.today import today_in
 from . import proposals, tools
-from .llm import HistoryMessage, LLMClient, get_llm
+from .llm import EventSink, HistoryMessage, LLMClient, get_llm
 from .tools import Session
 
 logger = logging.getLogger(__name__)
@@ -154,10 +158,23 @@ def message_view(ctx: Ctx, row: dict) -> dict:
     }
 
 
-def chat(
-    user: dict, workspace_id: str, project_id: str | None, text: str, llm: LLMClient | None = None
-) -> dict:
-    """Uma mensagem do usuário -> resposta do assistente. Lança UpstreamError (recuperável) se o provedor falhar."""
+@dataclass
+class ChatTurn:
+    """Mensagem já validada e gravada, pronta para ir ao modelo."""
+
+    user: dict
+    workspace_id: str
+    project_id: str | None
+    project_name: str | None
+    conversation_id: str
+    history: list[HistoryMessage]
+
+
+def start_chat(user: dict, workspace_id: str, project_id: str | None, text: str) -> ChatTurn:
+    """Valida escopo e limites e grava a mensagem do usuário (commit antes da chamada externa).
+
+    Separado da resposta para que erros de acesso/limite virem HTTP normal antes de abrir o stream.
+    """
     text = (text or "").strip()
     cfg = get_settings()
     if not text:
@@ -166,8 +183,6 @@ def chat(
         raise BadRequestError(
             f"Mensagem muito longa (máx. {cfg.assistant_max_input_chars} caracteres)."
         )
-
-    # 1) valida escopo, aplica limite e grava a mensagem do usuário (commit antes da chamada externa)
     with uow(user["id"]) as ctx:
         project_name = _validate_scope(ctx, workspace_id, project_id)
         _check_rate(ctx)
@@ -177,22 +192,41 @@ def chat(
             (conv, text),
         )
         history = _history(ctx, conv)
+    return ChatTurn(user, workspace_id, project_id, project_name, conv, history)
 
-    # 2) chama o modelo; as ferramentas rodam numa transação própria com o contexto da sessão
+
+def respond(
+    turn: ChatTurn, llm: LLMClient | None = None, on_event: EventSink | None = None
+) -> dict:
+    """Chama o modelo, grava a resposta e devolve a mensagem. Lança UpstreamError se o provedor falhar.
+
+    As ferramentas rodam numa transação própria com o contexto da sessão. `on_event` recebe o
+    progresso (trechos de texto e ferramenta em uso) para a interface mostrar enquanto espera.
+    """
+    user, workspace_id, conv = turn.user, turn.workspace_id, turn.conversation_id
+    cfg = get_settings()
     started = time.monotonic()
     result = None
+
+    def execute(name: str, args: dict) -> dict:
+        if on_event:
+            on_event({"type": "tool", "label": tools.status_label(name)})
+        return tools.execute(session, name, args)
+
     try:
         client = llm or get_llm()
         with uow(user["id"]) as ctx:
-            session = Session(ctx, workspace_id, conv, user["timezone"], project_id)
+            session = Session(ctx, workspace_id, conv, user["timezone"], turn.project_id)
             result = client.run(
-                INSTRUCTIONS + session_context(user["timezone"], project_name),
-                history,
+                INSTRUCTIONS + session_context(user["timezone"], turn.project_name),
+                turn.history,
                 tools.tool_specs(),
-                lambda n, a: tools.execute(session, n, a),
+                execute,
                 cfg.assistant_max_tool_rounds,
+                # Só quando há stream: provedores sem suporte seguem com a assinatura básica.
+                **({"on_event": on_event} if on_event else {}),
             )
-            reply = (result.text or "").strip() or (
+            text = (result.text or "").strip() or (
                 "Preparei uma proposta para você revisar."
                 if session.proposal
                 else "Não consegui responder agora."
@@ -202,7 +236,7 @@ def chat(
                 "VALUES (%s,'assistant',%s,%s,%s,%s) RETURNING *",
                 (
                     conv,
-                    reply,
+                    text,
                     Jsonb(session.links),
                     session.proposal["id"] if session.proposal else None,
                     Jsonb(
@@ -228,6 +262,44 @@ def chat(
         user["id"], workspace_id, int((time.monotonic() - started) * 1000), result, True, None
     )
     return {"conversation_id": conv, "message": out}
+
+
+def chat(
+    user: dict, workspace_id: str, project_id: str | None, text: str, llm: LLMClient | None = None
+) -> dict:
+    """Uma mensagem do usuário -> resposta do assistente, de uma vez (sem streaming)."""
+    return respond(start_chat(user, workspace_id, project_id, text), llm)
+
+
+def stream_reply(turn: ChatTurn, llm: LLMClient | None = None) -> Iterator[dict]:
+    """Eventos da resposta conforme acontecem; o último é sempre `done` ou `error`.
+
+    A rodada roda numa thread própria (conexão e transação nascem e morrem nela). Se a pessoa
+    fechar a tela no meio, a thread termina e grava a resposta mesmo assim: ela aparece ao reabrir.
+    """
+    events: queue.Queue[dict] = queue.Queue()
+
+    def work() -> None:
+        try:
+            events.put({"type": "done", **respond(turn, llm, events.put)})
+        except AppError as e:
+            events.put({"type": "error", "code": e.code, "message": e.message})
+        except Exception as e:  # o status HTTP já foi enviado: a falha vira evento
+            logger.error("Falha inesperada no assistente: %s", type(e).__name__)
+            events.put(
+                {
+                    "type": "error",
+                    "code": "internal",
+                    "message": "Algo deu errado ao responder. Tente de novo em instantes.",
+                }
+            )
+
+    threading.Thread(target=work, name="assistant-reply", daemon=True).start()
+    while True:
+        ev = events.get()
+        yield ev
+        if ev["type"] in ("done", "error"):
+            return
 
 
 def resolve_candidate(

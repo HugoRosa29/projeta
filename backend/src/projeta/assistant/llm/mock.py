@@ -9,7 +9,7 @@ from __future__ import annotations
 import re
 import unicodedata
 
-from .base import HistoryMessage, LLMResult, ToolExecutor
+from .base import EventSink, HistoryMessage, LLMResult, ToolExecutor
 
 
 def _norm(s: str) -> str:
@@ -109,7 +109,9 @@ class MockLLM:
         tools: list[dict],
         execute: ToolExecutor,
         max_rounds: int,
+        on_event: EventSink | None = None,
     ) -> LLMResult:
+        # Sem streaming: a interface recebe a resposta inteira no evento final.
         text = history[-1].content if history else ""
         n = _norm(text)
         rounds = 0
