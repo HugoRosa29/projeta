@@ -23,14 +23,34 @@ interface Props {
   canManage: boolean;
 }
 
+const SECTIONS = [
+  ["classificacao", "Classificação"],
+  ["funcoes", "Funções"],
+  ["semanal", "Acompanhamento semanal"],
+  ["tap", "Termo de abertura (TAP)"],
+  ["tep", "Termo de encerramento (TEP)"],
+] as const;
+type Section = (typeof SECTIONS)[number][0];
+
+/** Uma seção por vez, escolhida no menu lateral: os termos são longos e, empilhados, obrigavam a rolar a página inteira. */
 export function FormalPanel({ project, members, canManage }: Props) {
+  const [section, setSection] = useState<Section>("classificacao");
   return (
-    <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))" }}>
-      <Classification project={project} canManage={canManage} />
-      <Roles project={project} members={members} canManage={canManage} />
-      <StatusNotes project={project} canManage={canManage} />
-      <Term project={project} kind="tap" canManage={canManage} />
-      <Term project={project} kind="tep" canManage={canManage} />
+    <div className="formal-layout">
+      <nav className="formal-nav" aria-label="Seções do projeto formal">
+        {SECTIONS.map(([key, label]) => (
+          <button key={key} type="button" aria-current={section === key ? "true" : undefined} onClick={() => setSection(key)}>
+            {label}
+          </button>
+        ))}
+      </nav>
+      <div className="formal-pane">
+        {section === "classificacao" && <Classification project={project} canManage={canManage} />}
+        {section === "funcoes" && <Roles project={project} members={members} canManage={canManage} />}
+        {section === "semanal" && <StatusNotes project={project} canManage={canManage} />}
+        {section === "tap" && <Term key="tap" project={project} kind="tap" canManage={canManage} />}
+        {section === "tep" && <Term key="tep" project={project} kind="tep" canManage={canManage} />}
+      </div>
     </div>
   );
 }
@@ -229,7 +249,7 @@ function StatusNotes({ project, canManage }: { project: Project; canManage: bool
   });
   const set = (k: keyof Draft, v: string) => setForm((f) => (f ? { ...f, [k]: v } : f));
   return (
-    <section className="card" style={{ gridColumn: "1 / -1" }}>
+    <section className="card">
       <h2>Acompanhamento semanal</h2>
       {canManage && !form && (
         <button className="btn btn-sm" onClick={() => draft.mutate()} disabled={draft.isPending}>
@@ -351,7 +371,7 @@ function Term({ project, kind, canManage }: { project: Project; kind: TermKind; 
     queryFn: () => api.get<TermData>(`/projects/${project.id}/terms/${kind}`),
   });
   const [form, setForm] = useState<Record<string, string> | null>(null);
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(true);
   useEffect(() => {
     if (q.data) setForm(Object.fromEntries(TERM_FIELDS[kind].map(([k]) => [k, asText(q.data.content[k])])));
   }, [q.data, kind]);
@@ -383,7 +403,7 @@ function Term({ project, kind, canManage }: { project: Project; kind: TermKind; 
       termToMarkdown(kind, project.name, project.sei_process, form),
     );
   return (
-    <section className="card" style={{ gridColumn: open ? "1 / -1" : undefined }}>
+    <section className="card">
       <h2>{TERM_TITLE[kind]}</h2>
       <p className="muted">{q.data?.version ? `Versão ${q.data.version}` : "Ainda não preenchido"}</p>
       <div className="row">

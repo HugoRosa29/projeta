@@ -1,5 +1,5 @@
 export type Status = "todo" | "doing" | "blocked" | "done";
-export type Priority = "low" | "medium" | "high";
+export type Priority = "low" | "medium" | "high" | "urgent";
 export type Role = "admin" | "manager" | "member" | "viewer";
 /** Ações que o Gestor configura por perfil (identity/policy.py). O servidor confere sempre. */
 export type Permission =
@@ -9,7 +9,8 @@ export type Permission =
   | "task.write"
   | "comment.write"
   | "workspace.invite"
-  | "org.view_shared";
+  | "org.view_shared"
+  | "okr.manage";
 
 export const STATUSES: Status[] = ["todo", "doing", "blocked", "done"];
 export const STATUS_LABEL: Record<Status, string> = {
@@ -18,7 +19,8 @@ export const STATUS_LABEL: Record<Status, string> = {
   blocked: "Bloqueada",
   done: "Concluída",
 };
-export const PRIORITY_LABEL: Record<Priority, string> = { low: "Baixa", medium: "Média", high: "Alta" };
+/** Da mais urgente para a menos: a ordem das opções nos seletores. */
+export const PRIORITY_LABEL: Record<Priority, string> = { urgent: "Urgente", high: "Alta", medium: "Média", low: "Baixa" };
 export const ROLE_LABEL: Record<Role, string> = {
   admin: "Gestor",
   manager: "Gerente de projeto",
@@ -55,11 +57,15 @@ export interface Task {
   assignee_id: string | null;
   assignee_name: string | null;
   project_name: string | null;
+  /** Início planejado (data de calendário); com o prazo, dá a barra do cronograma. */
+  start_date?: string | null;
   due_date: string | null;
   estimate_minutes: number | null;
   progress: number;
   phase: string | null;
   is_milestone: boolean;
+  /** Tarefas do mesmo projeto que precisam terminar antes desta. */
+  depends_on_ids?: string[];
   labels: string[];
   version: number;
   created_at: string;
@@ -67,7 +73,13 @@ export interface Task {
   /** Tarefa-mãe (subtarefas têm um nível só). */
   parent_id?: string | null;
   parent_title?: string | null;
+  /** Sprint do projeto; nulo = backlog. Subtarefa acompanha a sprint da mãe. */
+  sprint_id?: string | null;
+  sprint_name?: string | null;
+  sprint_status?: SprintStatus | null;
+  position?: number;
 }
+export type SprintStatus = "planned" | "active" | "closed";
 /** Campo livre do projeto (portfólio): nome e valor definidos por quem usa. */
 export interface ProjectAttribute {
   name: string;
@@ -131,6 +143,11 @@ export const ACTIVITY_LABEL: Record<string, string> = {
   "task.status_changed": "mudou o estado da tarefa",
   "task.deleted": "removeu a tarefa",
   "task.commented": "comentou na tarefa",
+  "sprint.created": "planejou a sprint",
+  "sprint.started": "iniciou a sprint",
+  "sprint.goal_changed": "reescreveu a meta da sprint",
+  "sprint.closed": "encerrou a sprint",
+  "sprint.deleted": "excluiu a sprint",
 };
 
 /** "AAAA-MM-DD" -> "dd/mm" sem passar por Date/UTC (data de calendário não tem fuso). */

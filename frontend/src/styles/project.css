@@ -1,0 +1,159 @@
+/* ---------- Página do projeto: tela de trabalho sem rolagem de página ----------
+   No computador a página ocupa exatamente a altura da janela: cabeçalho baixo, faixa de abas e,
+   abaixo, a visão escolhida. Quem rola são os painéis (colunas do quadro, lista, backlog, atividade),
+   nunca a página inteira — o cabeçalho e as abas ficam sempre à vista.
+   No celular (ou janela muito baixa) tudo volta ao fluxo normal com rolagem da página. */
+
+.project-shell { container: projeto / inline-size; min-width: 0; }
+
+/* Cabeçalho compacto (Hero com `compact`) */
+.hero.hero-compact { grid-template-columns: minmax(0, 1fr); min-height: 0; margin-bottom: 12px; padding: 14px clamp(18px, 3vw, 28px); border-radius: 20px; }
+.hero.hero-compact.has-cover { min-height: 0; }
+/* Na visão geral a faixa cresce e preenche mais a tela; nas demais visões a altura fica para o trabalho. */
+.is-overview .hero.hero-compact { min-height: clamp(170px, 24vh, 240px); padding-block: 28px; align-content: center; }
+/* Título e ações empilhados à esquerda, centralizados na altura: a ilustração fica livre à direita, sem botão por cima. */
+.is-overview .hero-compact .hero-copy { grid-template-columns: minmax(0, 1fr); max-width: min(60%, 760px); }
+.is-overview .hero-compact .hero-actions { grid-column: 1; grid-row: auto; margin-top: 18px; justify-content: flex-start; }
+.is-overview .hero-compact .hero-art { inset: -10% -4% -30% 60%; opacity: 0.55; }
+.hero-compact .hero-copy { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 20px; align-items: center; }
+.hero-compact .eyebrow { grid-column: 1; margin-bottom: 2px; }
+.hero-compact h1 { grid-column: 1; font-size: clamp(1.2rem, 2vw, 1.55rem); display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; }
+.hero-compact .hero-sub { grid-column: 1; margin-top: 2px; max-width: none; font-size: 0.875rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hero-compact .hero-actions { grid-column: 2; grid-row: 1 / span 3; margin-top: 0; justify-content: flex-end; }
+.hero-compact .hero-art { position: absolute; inset: -20% -4% -60% 58%; margin: 0; opacity: 0.35; z-index: -1; animation: none; }
+@media (max-width: 820px) {
+  .hero-compact .hero-copy { grid-template-columns: minmax(0, 1fr); }
+  .is-overview .hero-compact .hero-copy { max-width: none; }
+  .hero-compact .hero-actions { grid-column: 1; grid-row: auto; margin-top: 10px; justify-content: flex-start; }
+}
+
+/* Abas e criação rápida na mesma faixa */
+.project-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; margin-bottom: 12px; }
+.project-bar .tabs { flex: 1 1 auto; min-width: 0; margin-bottom: 0; }
+.project-bar .tabs a { padding: 8px 12px; min-height: 40px; }
+.project-bar .quick-add { flex: 0 1 380px; margin: 0; }
+.project-bar .quick-add .input { min-height: 40px; padding: 6px 12px; }
+.project-bar .quick-add .btn { min-height: 40px; padding: 0 16px; }
+@container projeto (max-width: 760px) { .project-bar .quick-add { flex: 1 1 100%; } }
+
+.project-view { min-width: 0; }
+
+/* Painel: título fixo, corpo rola quando o espaço acaba. */
+.pane { display: flex; flex-direction: column; min-height: 0; }
+.pane > h2, .pane > .card-head, .pane > .sprint-hint, .pane > .coord { flex: none; }
+.pane > h2 { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+.pane-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+
+/* Barra de filtros acima de quadro e lista */
+.pv-toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 10px; }
+.pv-toolbar > * { min-width: 0; }
+.pv-toolbar .input, .pv-toolbar .select { min-height: 40px; padding: 6px 12px; flex: 1 1 160px; }
+.pv-toolbar .input { flex-basis: 220px; }
+.pv-count { margin-top: 8px; }
+
+/* Quadro */
+.column-empty { font-size: 0.8125rem; padding: 4px 2px; }
+
+/* Visão geral: números no topo, três colunas de listas enxutas */
+.pv-overview { display: grid; gap: 14px; }
+.pv-kpis { display: grid; gap: 12px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.pv-kpi { display: grid; align-content: start; gap: 4px; padding: 12px 16px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-md); }
+.pv-kpi strong { font-family: var(--display); font-size: 1.75rem; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.pv-kpi.alerta { border-color: color-mix(in srgb, var(--alerta) 45%, var(--line)); background: color-mix(in srgb, var(--alerta-tint) 55%, var(--surface)); }
+.pv-kpi.alerta strong { color: var(--alerta); }
+.pv-kpi.warn { border-color: color-mix(in srgb, var(--dourado) 45%, var(--line)); }
+.pv-kpi.warn strong { color: var(--dourado-deep); }
+.pv-kpi.zero strong { color: var(--ink-60); }
+.pv-kpi-progress .progress { margin-top: 2px; }
+.pv-kpi-note { font-size: 0.75rem; color: var(--ink-60); }
+.pv-cols { display: grid; gap: 14px; }
+.pv-col { display: grid; gap: 14px; align-content: start; min-width: 0; }
+.pv-cols .card + .card, .pv-col > .card + .card { margin-top: 0; }
+.pv-col .sprint-card .sprint-goal { margin: 6px 0 10px; }
+.pv-col .sprint-card .btn { margin-top: 10px; }
+.pv-rows { list-style: none; margin: 0; padding: 0; display: grid; }
+.pv-row { width: 100%; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 4px 10px; padding: 8px 4px; border: 0; border-bottom: 1px solid var(--line); background: none; text-align: left; cursor: pointer; font-size: 0.875rem; }
+.pv-rows li:last-child .pv-row { border-bottom: 0; }
+.pv-row:hover { background: var(--paper-deep); }
+.pv-row:hover .pv-row-title { color: var(--azul); text-decoration: underline; }
+.pv-row-title { font-weight: 600; overflow-wrap: anywhere; }
+.pv-row-meta { font-size: 0.75rem; color: var(--ink-60); max-width: 12ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pv-date { display: inline-block; min-width: 72px; font-family: var(--mono); font-size: 0.72rem; color: var(--ink-60); }
+.pv-date.today { color: var(--dourado-deep); font-weight: 700; }
+.pv-avatars { display: inline-flex; margin-left: 2px; }
+.pv-avatars span { display: inline-grid; place-items: center; width: 24px; height: 24px; margin-left: -6px; border-radius: 50%; background: rgba(255, 255, 255, 0.9); color: var(--azul-deep); font-size: 0.625rem; font-weight: 700; border: 1.5px solid var(--hero-b); }
+.pv-avatars span:first-child { margin-left: 0; }
+.pv-people, .pv-activity { list-style: none; margin: 0; padding: 0; display: grid; }
+.pv-people li, .pv-activity li { padding: 8px 2px; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
+.pv-people li:last-child, .pv-activity li:last-child { border-bottom: 0; }
+.pv-people li { display: flex; flex-wrap: wrap; gap: 2px 8px; font-size: 0.9rem; }
+.pv-activity li { font-size: 0.875rem; }
+.pv-activity .coord { margin-top: 2px; }
+.pv-facts { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px 16px; margin: 14px 0 0; }
+.pv-facts dd { margin: 4px 0 0; overflow-wrap: anywhere; font-size: 0.9rem; }
+/* Diálogos do cabeçalho (ficha, equipe, histórico) */
+.dialog.pv-dialog { width: min(760px, 100%); }
+.pv-dialog .pv-about { border: 0; padding: 0; }
+.pv-dialog-actions { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--line); }
+@container projeto (min-width: 640px) { .pv-kpis { grid-template-columns: minmax(0, 1.6fr) repeat(3, minmax(0, 1fr)); } .pv-cols { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@container projeto (min-width: 940px) { .pv-cols { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+
+/* Formal: menu de seções + uma seção por vez */
+.formal-layout { display: grid; gap: 14px; }
+.formal-nav { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 2px; }
+.formal-nav button { flex: none; min-height: 40px; padding: 8px 14px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface); font-weight: 600; text-align: left; white-space: nowrap; cursor: pointer; }
+.formal-nav button:hover { border-color: var(--verde); }
+.formal-nav button[aria-current="true"] { background: var(--verde-tint); color: var(--verde-deep); border-color: transparent; }
+.formal-pane { min-width: 0; }
+@container projeto (min-width: 760px) {
+  .formal-layout { grid-template-columns: 240px minmax(0, 1fr); align-items: start; }
+  .formal-nav { flex-direction: column; overflow: visible; padding: 8px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-md); }
+  .formal-nav button { border-color: transparent; border-radius: var(--radius-sm); background: transparent; white-space: normal; }
+  .formal-nav button:hover { background: var(--paper-deep); border-color: transparent; }
+}
+
+/* ---------- Modo tela cheia (computador) ---------- */
+@media (min-width: 821px) and (min-height: 620px) {
+  .main:has(> .project-shell) { height: 100dvh; display: flex; flex-direction: column; padding-bottom: 16px; max-width: 1480px; }
+  .main:has(> .project-shell) > .topbar { flex: none; margin-bottom: 12px; }
+  .project-shell { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+  .project-shell > .hero, .project-bar { flex: none; }
+  /* Rede de segurança: se uma visão não couber (coluna estreita), rola só a área da visão. */
+  .project-view { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+
+  /* Quadro, lista e cronograma ocupam a altura toda; rolam por dentro. */
+  .project-view.pv-quadro, .project-view.pv-lista, .project-view.pv-cronograma { overflow: hidden; }
+  .pv-stack { height: 100%; display: flex; flex-direction: column; }
+  .pv-stack > .pv-toolbar, .pv-stack > .pv-count { flex: none; }
+  .pv-stack > .board { flex: 1; min-height: 0; grid-template-rows: minmax(0, 1fr); padding-bottom: 4px; }
+  .pv-stack > .board .column { display: flex; flex-direction: column; min-height: 0; }
+  .pv-stack > .board .column h3 { flex: none; }
+  .pv-stack > .board .column-list { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; align-content: start; padding: 2px; margin: -2px; }
+  .pv-scroll { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding-right: 4px; }
+  .pv-timeline { height: 100%; }
+  .pv-timeline .timeline { align-content: start; padding-right: 4px; }
+
+  @container projeto (min-width: 940px) {
+    .project-view.pv-visao { overflow: hidden; }
+    .pv-overview { height: 100%; grid-template-rows: auto minmax(0, 1fr); }
+    .pv-cols { min-height: 0; align-items: start; }
+    /* Cada cartão encolhe até o conteúdo e, se passar da altura, rola por dentro. */
+    .pv-cols > .card, .pv-col { max-height: 100%; min-height: 0; }
+    .pv-col { display: flex; flex-direction: column; }
+    .pv-col > .card { flex: 0 1 auto; min-height: 0; }
+    .pv-col > .sprint-card { flex: none; }
+
+    .project-view.pv-sprints { overflow: hidden; }
+    .sprint-plan { height: 100%; grid-template-rows: minmax(0, 1fr); align-items: stretch; }
+    .sprint-backlog { min-height: 0; }
+    .sprint-col { min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 2px 4px 2px 2px; }
+    .sprint-col .sprint-history { margin-top: 4px; }
+  }
+
+  @container projeto (min-width: 760px) {
+    .project-view.pv-formal { overflow: hidden; }
+    .formal-layout { height: 100%; grid-template-rows: minmax(0, 1fr); }
+    .formal-nav { align-self: start; }
+    .formal-pane { height: 100%; overflow-y: auto; overscroll-behavior: contain; padding-right: 4px; }
+  }
+}

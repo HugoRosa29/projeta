@@ -7,16 +7,19 @@ export function Hero({
   title,
   subtitle,
   cover,
+  compact,
   children,
 }: {
   eyebrow: ReactNode;
   title: ReactNode;
   subtitle?: ReactNode;
   cover?: string;
+  /** Faixa baixa, com as ações à direita: para telas de trabalho que precisam da altura útil. */
+  compact?: boolean;
   children?: ReactNode;
 }) {
   return (
-    <header className={`hero ${cover ? "has-cover" : ""}`}>
+    <header className={`hero ${cover ? "has-cover" : ""} ${compact ? "hero-compact" : ""}`}>
       {cover && <img className="hero-cover" src={cover} alt="" />}
       <div className="hero-copy">
         <p className="eyebrow">{eyebrow}</p>

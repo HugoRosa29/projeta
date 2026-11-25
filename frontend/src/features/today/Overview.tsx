@@ -1,34 +1,18 @@
 import { useQuery } from "@tanstack/react-query";
-import { CircleGauge, FolderKanban, ListTodo, OctagonAlert, TriangleAlert, X } from "lucide-react";
-import { useMemo, useState, type ReactNode } from "react";
+import { ChevronDown, X } from "lucide-react";
+import { useMemo, useState } from "react";
 import { Link } from "react-router";
 import { ErrorBox } from "../../components/ui";
-import { HEALTH_LABEL, type Health, type PortfolioRow } from "../../domain/formal";
-import {
-  HEALTH_ORDER,
-  NO_FILTER,
-  TASK_STATE_ORDER,
-  applyFilter,
-  byField,
-  defaultField,
-  fieldBars,
-  overdueBars,
-  phaseBars,
-  progressBars,
-  summarize,
-  type Bar,
-  type OverviewFilter,
-  type TaskState,
-} from "../../domain/overview";
-import { STATUS_LABEL } from "../../domain/types";
-import { attributeIndex } from "../../domain/work";
+import { GROUP_LABEL, HEALTH_COLOR, daysText, elapsed, groupTracks, rangeText, type BoardGroup, type GroupBy } from "../../domain/board";
+import { PACE_LABEL, track, type Track } from "../../domain/esteira";
+import { HEALTH_LABEL, PHASE_LABEL, type Health, type PortfolioRow } from "../../domain/formal";
+import { NO_FILTER, applyFilter, byField, summarize, type OverviewFilter } from "../../domain/overview";
+import { fmtDate, isoDate } from "../../domain/types";
+import { attributeIndex, projectProgress } from "../../domain/work";
 import { api } from "../../services/api";
 import { areasOf, pickArea } from "../../domain/areas";
 import { AreaSummary, AreaTabs, areaQuery, useArea } from "./Areas";
-import { Esteira } from "./Esteira";
 
-const HEALTH_TONE: Record<Health, string> = { on_track: "ok", at_risk: "warn", late: "bad" };
-const STATE_TONE: Record<TaskState, string> = { done: "ok", doing: "info", todo: "rest", blocked: "warn" };
 const fmt = (n: number) => n.toLocaleString("pt-BR");
 const plural = (n: number, one: string, many: string) => `${fmt(n)} ${n === 1 ? one : many}`;
 
@@ -66,264 +50,233 @@ function AreaPanorama({ rows, workspaceId, workspaceName }: { rows: PortfolioRow
   );
 }
 
-export function Panorama({ rows, workspaceName, portfolioHref = "/portfolio" }: { rows: PortfolioRow[]; workspaceName: string; portfolioHref?: string }) {
-  const [filter, setFilter] = useState<OverviewFilter>(NO_FILTER);
-  const index = useMemo(() => attributeIndex(rows.map((r) => r.attributes)), [rows]);
-  const [picked, setGroupBy] = useState("");
-  const groupBy = index.has(picked) ? picked : defaultField(index);
 
-  // A situação é calculada sem o próprio filtro, para destacar o segmento escolhido sem sumir com os outros.
-  const sliced = byField(rows, filter.field, filter.value);
-  const shown = applyFilter(rows, filter);
-  const s = summarize(shown);
-  const healthCounts = summarize(sliced).health;
-  const phases = phaseBars(shown);
-  const filtered = filter.health || filter.field;
+interface PanoramaProps {
+  rows: PortfolioRow[];
+  workspaceName: string;
+  portfolioHref?: string;
+  /** Data de referência dos prazos ("aaaa-mm-dd"); fixa nos testes. */
+  today?: string;
+}
+
+/** Panorama em formato de quadro, enxuto: poucos números no topo e os projetos em grupos
+ *  recolhíveis, uma linha cada. Cor só onde pede atenção (risco, atraso, prazo vencido). */
+export function Panorama({ rows, workspaceName, portfolioHref = "/portfolio", today = isoDate(new Date()) }: PanoramaProps) {
+  const [filter, setFilter] = useState<OverviewFilter>(NO_FILTER);
+  const [picked, setGroupBy] = useState<GroupBy>("health");
+  const [closed, setClosed] = useState<ReadonlySet<string>>(new Set());
+  const index = useMemo(() => attributeIndex(rows.map((r) => r.attributes)), [rows]);
+  // Um campo que sumiu do recorte (troca de área) volta ao agrupamento por situação.
+  const groupBy: GroupBy = picked.startsWith("field:") && !index.has(picked.slice(6)) ? "health" : picked;
+
+  // Os contadores de situação ignoram o próprio filtro, para o número escolhido não virar zero nos outros.
+  const healthCounts = summarize(byField(rows, filter.field, filter.value)).health;
+  const shownRows = applyFilter(rows, filter);
+  const s = summarize(shownRows);
+  const groups = groupTracks(shownRows.map((r) => track(r, today)), groupBy);
+
+  const filtered = Boolean(filter.health || filter.field);
   const subtitle = filtered
-    ? `${plural(shown.length, "projeto", "projetos")} de ${fmt(rows.length)} no recorte`
+    ? `${plural(shownRows.length, "projeto", "projetos")} de ${fmt(rows.length)} no recorte`
     : `${plural(rows.length, "projeto ativo", "projetos ativos")} que você pode ver em ${workspaceName}`;
   const toggleHealth = (h: Health) => setFilter((f) => ({ ...f, health: f.health === h ? null : h }));
   // Trocar de campo zera o valor: um valor de "Complexidade" não vale para "PDTI".
   const pickField = (field: string) => setFilter((f) => ({ ...f, field, value: "" }));
   const pickValue = (value: string) => setFilter((f) => ({ ...f, value }));
+  const toggleGroup = (k: string) =>
+    setClosed((cur) => {
+      const next = new Set(cur);
+      if (!next.delete(k)) next.add(k);
+      return next;
+    });
+  // Agrupado por situação, a coluna repetiria o nome do grupo em toda linha.
+  const showHealth = groupBy !== "health";
 
   return (
-    <section className="ov" aria-labelledby="ov-title">
-      <div className="ov-head">
-        <div>
+    <section className="ov pn" aria-labelledby="ov-title">
+      <div className="pn-head">
+        <div className="pn-title">
           <h2 id="ov-title">Panorama</h2>
           <p className="muted">{subtitle}</p>
         </div>
-        <Link to={portfolioHref} className="btn btn-ghost btn-sm">Abrir portfólio</Link>
+        <div className="pn-tools" role="search" aria-label="Filtrar o panorama">
+          {index.size > 0 && (
+            <select className="select pn-select" aria-label="Filtrar por campo" value={filter.field} onChange={(e) => pickField(e.target.value)}>
+              <option value="">Todos os campos</option>
+              {[...index.keys()].map((n) => <option key={n} value={n}>{n}</option>)}
+            </select>
+          )}
+          {filter.field && (
+            <select className="select pn-select" aria-label={`Valor de ${filter.field}`} value={filter.value} onChange={(e) => pickValue(e.target.value)}>
+              <option value="">Qualquer valor</option>
+              {(index.get(filter.field) ?? []).map((v) => <option key={v} value={v}>{v}</option>)}
+            </select>
+          )}
+          <label className="pn-groupby">
+            <span>Agrupar por</span>
+            <select className="select pn-select" value={groupBy} onChange={(e) => { setGroupBy(e.target.value as GroupBy); setClosed(new Set()); }}>
+              {(Object.keys(GROUP_LABEL) as (keyof typeof GROUP_LABEL)[]).map((k) => <option key={k} value={k}>{GROUP_LABEL[k]}</option>)}
+              {[...index.keys()].map((n) => <option key={n} value={`field:${n}`}>{n}</option>)}
+            </select>
+          </label>
+          {filtered && <button type="button" className="btn btn-ghost btn-sm" onClick={() => setFilter(NO_FILTER)}>Limpar filtros</button>}
+          <Link to={portfolioHref} className="btn btn-ghost btn-sm">Abrir portfólio</Link>
+        </div>
       </div>
 
-      {(index.size > 0 || filter.health) && (
-        <div className="row ov-filters" role="search" aria-label="Filtrar o panorama">
-          {index.size > 0 && (
-            <>
-              <select className="select" aria-label="Filtrar por campo" value={filter.field} onChange={(e) => pickField(e.target.value)}>
-                <option value="">Todos os campos</option>
-                {[...index.keys()].map((n) => <option key={n} value={n}>{n}</option>)}
-              </select>
-              {filter.field && (
-                <select className="select" aria-label={`Valor de ${filter.field}`} value={filter.value} onChange={(e) => pickValue(e.target.value)}>
-                  <option value="">Qualquer valor</option>
-                  {(index.get(filter.field) ?? []).map((v) => <option key={v} value={v}>{v}</option>)}
-                </select>
-              )}
-            </>
-          )}
-          {filter.health && (
-            <button
-              type="button"
-              className="badge ov-chip"
-              onClick={() => setFilter((f) => ({ ...f, health: null }))}
-              aria-label={`Remover filtro de situação ${HEALTH_LABEL[filter.health]}`}
-            >
-              Situação: {HEALTH_LABEL[filter.health]} <X size={13} aria-hidden />
-            </button>
-          )}
-          {filtered && <button type="button" className="btn btn-ghost btn-sm" onClick={() => setFilter(NO_FILTER)}>Limpar filtros</button>}
+      <ul className="pn-stats" aria-label="Resumo">
+        <Stat label="Projetos" value={fmt(s.projects)} />
+        <Stat label="Conclusão média" value={`${s.avgProgress}%`} />
+        <Stat label="Em risco" value={fmt(healthCounts.at_risk)} tone={healthCounts.at_risk ? "warn" : undefined} pressed={filter.health === "at_risk"} onClick={() => toggleHealth("at_risk")} />
+        <Stat label="Atrasados" value={fmt(healthCounts.late)} tone={healthCounts.late ? "bad" : undefined} pressed={filter.health === "late"} onClick={() => toggleHealth("late")} />
+        <Stat label="Tarefas atrasadas" value={fmt(s.overdue)} tone={s.overdue ? "bad" : undefined} />
+      </ul>
+
+      {filter.health && (
+        <div className="row pn-chips">
+          <button type="button" className="badge ov-chip" onClick={() => toggleHealth(filter.health!)} aria-label={`Remover filtro de situação ${HEALTH_LABEL[filter.health]}`}>
+            Situação: {HEALTH_LABEL[filter.health]} <X size={13} aria-hidden />
+          </button>
         </div>
       )}
 
-      <div className="ov-kpis">
-        <Kpi icon={<FolderKanban size={18} aria-hidden />} label="Projetos ativos" value={fmt(s.projects)} />
-        <Kpi icon={<CircleGauge size={18} aria-hidden />} label="Conclusão média" value={`${s.avgProgress}%`} />
-        <Kpi icon={<ListTodo size={18} aria-hidden />} label="Tarefas abertas" value={fmt(s.open)} note={`de ${fmt(s.tasks)}`} />
-        <Kpi icon={<TriangleAlert size={18} aria-hidden />} label="Tarefas atrasadas" value={fmt(s.overdue)} tone={s.overdue ? "bad" : undefined} />
-        <Kpi icon={<OctagonAlert size={18} aria-hidden />} label="Tarefas bloqueadas" value={fmt(s.blocked)} tone={s.blocked ? "warn" : undefined} />
-      </div>
-
-      {/* Logo após os indicadores: é a leitura principal do panorama, no mesmo recorte dos filtros. */}
-      <Esteira rows={shown} />
-
-      <div className="ov-grid">
-        <Chart title="Situação dos projetos" hint="Clique numa situação para filtrar o panorama.">
-          <Segmented
-            label="Situação dos projetos"
-            unit={["projeto", "projetos"]}
-            parts={HEALTH_ORDER.map((h) => ({ key: h, label: HEALTH_LABEL[h], n: healthCounts[h], tone: HEALTH_TONE[h] }))}
-            selected={filter.health}
-            onSelect={(k) => toggleHealth(k as Health)}
-          />
-        </Chart>
-
-        <Chart title="Tarefas por estado">
-          {s.tasks ? (
-            <Segmented
-              label="Tarefas por estado"
-              unit={["tarefa", "tarefas"]}
-              parts={TASK_STATE_ORDER.map((k) => ({ key: k, label: STATUS_LABEL[k], n: s.states[k], tone: STATE_TONE[k] }))}
-            />
-          ) : (
-            <p className="muted">Nenhuma tarefa nos projetos do recorte.</p>
-          )}
-        </Chart>
-
-        <Chart title="Progresso por projeto" hint="% informado por quem gerencia ou, sem ele, tarefas concluídas.">
-          <BarList bars={progressBars(shown)} tone="info" scale={100} suffix="%" name="Progresso" />
-        </Chart>
-
-        <Chart title="Tarefas atrasadas por projeto">
-          {s.overdue ? (
-            <BarList bars={overdueBars(shown)} tone="bad" name="Tarefas atrasadas" />
-          ) : (
-            <p className="muted">Nenhuma tarefa atrasada no recorte.</p>
-          )}
-        </Chart>
-
-        {phases.length > 0 && (
-          <Chart title="Projetos formais por fase">
-            <BarList bars={phases} tone="info" name="Projetos" all />
-          </Chart>
-        )}
-
-        {index.size > 0 && groupBy && (
-          <Chart
-            title={`Projetos por ${groupBy}`}
-            action={
-              index.size > 1 && (
-                <select className="select ov-select" aria-label="Agrupar projetos por campo" value={groupBy} onChange={(e) => setGroupBy(e.target.value)}>
-                  {[...index.keys()].map((n) => <option key={n} value={n}>{n}</option>)}
-                </select>
-              )
-            }
-          >
-            <BarList bars={fieldBars(shown, groupBy)} tone="info" name="Projetos" all />
-          </Chart>
-        )}
-      </div>
+      {groups.length ? (
+        // Como um board: cada grupo é uma tabela com o próprio cabeçalho e uma linha de resumo.
+        <div className="pn-board-wrap" role="region" aria-label="Quadro dos projetos">
+          {groups.map((g) => (
+            <Group key={g.key} g={g} open={!closed.has(g.key)} onToggle={() => toggleGroup(g.key)} showHealth={showHealth} today={today} />
+          ))}
+        </div>
+      ) : (
+        <p className="muted pn-empty">Nenhum projeto neste recorte.</p>
+      )}
     </section>
   );
 }
 
-function Kpi({ icon, label, value, note, tone }: { icon: ReactNode; label: string; value: string; note?: string; tone?: string }) {
+function Group({ g, open, onToggle, showHealth, today }: { g: BoardGroup; open: boolean; onToggle: () => void; showHealth: boolean; today: string }) {
+  const rows = g.tracks.map((t) => t.row);
+  const sum = summarize(rows);
+  const starts = g.tracks.map((t) => t.start ?? t.end).filter((d): d is string => !!d).sort();
+  const ends = g.tracks.map((t) => t.end).filter((d): d is string => !!d).sort();
+  const from = starts[0] ?? null;
+  const to = ends.at(-1) ?? null;
   return (
-    <div className={`ov-kpi ${tone ?? ""}`}>
-      <span className="ov-kpi-l">{icon}{label}</span>
-      <span className="ov-kpi-n">
-        {value}
-        {note && <small className="muted"> {note}</small>}
-      </span>
-    </div>
+    <section className={`pn-group g-${g.color}`}>
+      <table className="pn-board" aria-label={g.label}>
+        <thead>
+          <tr>
+            <th scope="col" className="pn-gtitle">
+              <button type="button" aria-expanded={open} onClick={onToggle}>
+                <ChevronDown size={18} aria-hidden className="pn-chev" />
+                <span className="pn-group-l">{g.label}</span>
+              </button>
+              <span className="pn-count">{plural(g.tracks.length, "projeto", "projetos")}</span>
+            </th>
+            {showHealth && <th scope="col" className="pn-c-health">Situação</th>}
+            <th scope="col" className="pn-c-prog">Progresso</th>
+            <th scope="col" className="pn-c-tl">Timeline</th>
+            <th scope="col" className="pn-c-date">Término</th>
+            <th scope="col" className="pn-c-num">Atrasadas</th>
+          </tr>
+        </thead>
+        {open && (
+          <>
+            <tbody>{g.tracks.map((t) => <BoardRow key={t.row.id} t={t} showHealth={showHealth} today={today} />)}</tbody>
+            <tfoot>
+              <tr>
+                <td className="pn-foot-pad" />
+                {showHealth && (
+                  <td className="pn-c-health">
+                    <span className="pn-mix" role="img" aria-label={`Situação: ${(["late", "at_risk", "on_track"] as Health[]).map((h) => `${HEALTH_LABEL[h]} ${sum.health[h]}`).join(", ")}`}>
+                      {(["on_track", "at_risk", "late"] as Health[]).filter((h) => sum.health[h]).map((h) => (
+                        <span key={h} className={`g-${HEALTH_COLOR[h]}`} style={{ flexGrow: sum.health[h] }} />
+                      ))}
+                    </span>
+                  </td>
+                )}
+                <td className="pn-c-prog"><Battery pct={sum.avgProgress} name="Média do grupo" /></td>
+                <td className="pn-c-tl"><Pill start={from} end={to} today={today} /></td>
+                <td className="pn-c-date" />
+                <td className={`pn-c-num${sum.overdue ? " pn-bad" : ""}`}>
+                  <span className="sr-only">Tarefas atrasadas no grupo: </span>
+                  {fmt(sum.overdue)}
+                  <small> soma</small>
+                </td>
+              </tr>
+            </tfoot>
+          </>
+        )}
+      </table>
+    </section>
   );
 }
 
-function Chart({ title, hint, action, children }: { title: string; hint?: string; action?: ReactNode; children: ReactNode }) {
+function BoardRow({ t, showHealth, today }: { t: Track; showHealth: boolean; today: string }) {
+  const r = t.row;
+  const { informed } = projectProgress(r);
+  const late = t.pace === "late";
   return (
-    <article className="card ov-card">
-      <div className="ov-card-head">
-        <h3>{title}</h3>
-        {action}
-      </div>
-      {hint && <p className="ov-hint muted">{hint}</p>}
-      {children}
-    </article>
+    <tr>
+      <th scope="row" className="pn-name">
+        <Link to={`/projetos/${r.id}`} title={r.phase ? `${r.name} · ${PHASE_LABEL[r.phase]}` : r.name}>{r.name}</Link>
+      </th>
+      {showHealth && <td className={`pn-c-health pn-label g-${HEALTH_COLOR[r.health]}`}>{HEALTH_LABEL[r.health]}</td>}
+      <td className="pn-c-prog" title={`${informed ? "% informado · " : ""}${fmt(r.done_count)} de ${fmt(r.task_count)} tarefas concluídas`}>
+        <Battery pct={t.pct} name="Progresso" />
+      </td>
+      <td className="pn-c-tl" title={[PACE_LABEL[t.pace], daysText(t)].join(" · ")}>
+        <Pill start={t.start} end={t.end} today={today} />
+      </td>
+      <td className="pn-c-date" title={daysText(t)}>
+        {t.end ? fmtDate(t.end) : "—"}
+        {late && <span className="sr-only"> ({daysText(t)})</span>}
+      </td>
+      <td className={`pn-c-num${r.overdue_count ? " pn-bad" : " muted"}`}>
+        <span className="sr-only">Tarefas atrasadas: </span>
+        {r.overdue_count ? fmt(r.overdue_count) : "—"}
+      </td>
+    </tr>
   );
 }
 
-interface Part {
-  key: string;
-  label: string;
-  n: number;
-  tone: string;
-}
-
-interface SegmentedProps {
-  label: string;
-  /** Singular e plural, para as descrições ("1 projeto", "3 projetos"). */
-  unit: [string, string];
-  parts: Part[];
-  selected?: string | null;
-  /** Com ele, a legenda vira botões de filtro. */
-  onSelect?: (key: string) => void;
-}
-
-/** Barra segmentada: um todo dividido em partes. A legenda traz os números, então nada depende só da cor. */
-function Segmented({ label, unit, parts, selected, onSelect }: SegmentedProps) {
-  const total = parts.reduce((n, p) => n + p.n, 0);
-  const share = (n: number) => (total ? Math.round((n / total) * 100) : 0);
-  const describe = (p: Part) => `${p.label}: ${plural(p.n, unit[0], unit[1])} (${share(p.n)}%)`;
-  const dim = (p: Part) => (selected && selected !== p.key ? " dim" : "");
+/** Pílula da timeline: a parte cheia é o tempo já decorrido do período. */
+function Pill({ start, end, today }: { start: string | null; end: string | null; today: string }) {
+  if (!end) return <span className="pn-pill pn-pill-none">sem data</span>;
+  const done = Math.round(elapsed(start, end, today) * 100);
   return (
-    <div>
-      <div className="ov-seg" role="img" aria-label={`${label}: ${parts.map(describe).join("; ")}`}>
-        {parts
-          .filter((p) => p.n > 0)
-          .map((p) => (
-            // Só cabe o rótulo dentro do bloco quando ele ocupa uma fatia razoável da barra.
-            <span key={p.key} className={`ov-block t-${p.tone}${dim(p)}`} style={{ flexGrow: p.n }} data-tip={describe(p)}>
-              {p.n / total >= 0.12 && `${share(p.n)}%`}
-            </span>
-          ))}
-      </div>
-      <ul className="ov-legend">
-        {parts.map((p) => {
-          const body = (
-            <>
-              <i className={`ov-swatch t-${p.tone}`} aria-hidden />
-              <span>{p.label}</span>
-              <strong>{fmt(p.n)}</strong>
-            </>
-          );
-          return (
-            <li key={p.key} className={dim(p).trim()}>
-              {onSelect ? (
-                <button type="button" aria-pressed={selected === p.key} onClick={() => onSelect(p.key)} aria-label={`Filtrar por ${p.label} (${plural(p.n, unit[0], unit[1])})`}>
-                  {body}
-                </button>
-              ) : (
-                body
-              )}
-            </li>
-          );
-        })}
-      </ul>
-    </div>
+    <span className="pn-pill" style={{ ["--done" as string]: `${done}%` }}>
+      {rangeText(start, end, today)}
+    </span>
   );
 }
 
-const PREVIEW = 8;
-
-interface BarListProps {
-  bars: Bar[];
-  tone: string;
-  /** Máximo fixo da escala (100 para %); sem ele, vale o maior valor. */
-  scale?: number;
-  suffix?: string;
-  /** O que o número mede, lido por leitores de tela antes do valor. */
-  name: string;
-  /** Mostra todas as barras de uma vez, sem o "Ver todos". */
-  all?: boolean;
+/** Bateria: barra de % com o valor ao lado. */
+function Battery({ pct, name }: { pct: number; name: string }) {
+  return (
+    <span className="pn-bat">
+      <span className="pn-bat-track" aria-hidden><span className="pn-bat-fill" style={{ width: `${Math.min(100, Math.max(0, pct))}%` }} /></span>
+      <span className="pn-bat-v"><span className="sr-only">{name}: </span>{pct}%</span>
+    </span>
+  );
 }
 
-/** Barras horizontais ordenadas, com o valor na ponta. */
-function BarList({ bars, tone, scale, suffix = "", name, all = false }: BarListProps) {
-  const [expanded, setExpanded] = useState(false);
-  const max = scale ?? Math.max(1, ...bars.map((b) => b.value));
-  const visible = all || expanded ? bars : bars.slice(0, PREVIEW);
-  return (
+function Stat({ label, value, tone, pressed, onClick }: { label: string; value: string; tone?: string; pressed?: boolean; onClick?: () => void }) {
+  const body = (
     <>
-      <ul className={`ov-bars${scale ? " has-track" : ""}`}>
-        {visible.map((b) => (
-          <li key={b.key}>
-            {b.to ? <Link to={b.to} className="ov-bar-l">{b.label}</Link> : <span className="ov-bar-l">{b.label}</span>}
-            <span className="ov-track" data-tip={`${b.label}: ${fmt(b.value)}${suffix}${b.detail ? ` · ${b.detail}` : ""}`}>
-              {b.value > 0 && <span className={`ov-bar t-${tone}`} style={{ width: `${(b.value / max) * 100}%` }} />}
-            </span>
-            <span className="ov-bar-v">
-              <span className="sr-only">{name}: </span>
-              {fmt(b.value)}{suffix}
-            </span>
-          </li>
-        ))}
-      </ul>
-      {!all && bars.length > PREVIEW && (
-        <button type="button" className="btn btn-ghost btn-sm ov-more" onClick={() => setExpanded((e) => !e)} aria-expanded={expanded}>
-          {expanded ? "Mostrar menos" : `Ver todos (${bars.length})`}
-        </button>
-      )}
+      <span className="pn-stat-v">{value}</span>
+      <span className="pn-stat-l">{label}</span>
     </>
+  );
+  return (
+    <li className={`pn-stat${tone ? ` pn-${tone}` : ""}`}>
+      {onClick ? (
+        <button type="button" aria-pressed={pressed} onClick={onClick} aria-label={`Filtrar por ${label} (${value})`}>
+          {body}
+        </button>
+      ) : (
+        <div>{body}</div>
+      )}
+    </li>
   );
 }

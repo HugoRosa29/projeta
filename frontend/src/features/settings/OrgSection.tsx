@@ -15,14 +15,17 @@ export interface OrgView {
   chain: Unit[];
   children: Unit[];
   can_share: boolean;
-  own: { id: string; name: string; shared_up: boolean }[];
-  received: { id: string; name: string; origin_unit: string | null; origin_workspace: string; shared_up: boolean }[];
+  /** Destinos do compartilhamento direto: o organograma menos a própria unidade e a de cima. */
+  units: { sigla: string; label: string }[];
+  own: { id: string; name: string; shared_up: boolean; direct: string[] }[];
+  received: { id: string; name: string; origin_unit: string | null; origin_workspace: string; shared_up: boolean; can_repass: boolean }[];
 }
 
 const label = (chain: Unit[], sigla: string | null) => chain.find((u) => u.sigla === sigla)?.label ?? sigla ?? "";
 
-/** Lugar do espaço no organograma e o que ele compartilha com a unidade acima. O servidor decide
- *  quem pode compartilhar (Gestor do espaço) e quem vê o que foi recebido (matriz de permissões). */
+/** Lugar do espaço no organograma e o que ele compartilha: com a unidade acima (repassável) e,
+ *  direto, com qualquer outro setor (não repassável). O servidor decide quem pode compartilhar
+ *  (Gestor do espaço) e quem vê o que foi recebido (matriz de permissões). */
 export function OrgSection({ workspaceId, onError, onDone }: { workspaceId: string; onError: (e: unknown) => void; onDone: (msg: string) => void }) {
   const qc = useQueryClient();
   const key = ["ws", "org", workspaceId];
@@ -31,6 +34,14 @@ export function OrgSection({ workspaceId, onError, onDone }: { workspaceId: stri
   const toggle = useMutation({
     mutationFn: (v: { id: string; on: boolean }) =>
       v.on ? api.post(`/workspaces/${workspaceId}/org/shares`, { project_id: v.id }) : api.del(`/workspaces/${workspaceId}/org/shares/${v.id}`),
+    onSuccess: after("Compartilhamento atualizado"),
+    onError,
+  });
+  const direct = useMutation({
+    mutationFn: (v: { id: string; unit: string; on: boolean }) =>
+      v.on
+        ? api.post(`/workspaces/${workspaceId}/org/direct-shares`, { project_id: v.id, unit: v.unit })
+        : api.del(`/workspaces/${workspaceId}/org/direct-shares/${v.id}/${encodeURIComponent(v.unit)}`),
     onSuccess: after("Compartilhamento atualizado"),
     onError,
   });
@@ -50,7 +61,8 @@ export function OrgSection({ workspaceId, onError, onDone }: { workspaceId: stri
     );
   }
   const parent = label(v.chain, v.parent);
-  const busy = toggle.isPending || all.isPending;
+  const busy = toggle.isPending || all.isPending || direct.isPending;
+  const unitLabel = (sigla: string) => v.units.find((u) => u.sigla === sigla)?.label ?? sigla;
   const parentHasSpace = v.chain[1]?.has_space ?? false;
 
   return (
@@ -90,15 +102,57 @@ export function OrgSection({ workspaceId, onError, onDone }: { workspaceId: stri
         </>
       )}
 
+      <h3 style={{ marginTop: 16 }}>Compartilhar com outros setores</h3>
+      <p className="muted">
+        Qualquer setor do organograma, mesmo fora da sua linha hierárquica. Ele vê em leitura e não repassa a ninguém: só este espaço decide.
+      </p>
+      {v.own.length === 0 ? <p className="muted">Nenhum projeto ativo neste espaço.</p> : (
+        <ul className="task-list" style={{ marginTop: 8 }}>
+          {v.own.map((p) => {
+            const free = v.units.filter((u) => !p.direct.includes(u.sigla));
+            return (
+              <li key={p.id} className="task-row" style={{ flexWrap: "wrap", gap: 8 }}>
+                <span style={{ flex: 1, minWidth: 140 }}>{p.name}</span>
+                <span className="row" style={{ gap: 6, flexWrap: "wrap" }} aria-label={`Setores com acesso direto a ${p.name}`}>
+                  {p.direct.map((u) => (
+                    <span key={u} className="badge">
+                      {unitLabel(u)}
+                      {v.can_share && (
+                        <button type="button" className="btn btn-ghost btn-sm" disabled={busy} onClick={() => direct.mutate({ id: p.id, unit: u, on: false })} aria-label={`Parar de compartilhar ${p.name} com ${unitLabel(u)}`}>×</button>
+                      )}
+                    </span>
+                  ))}
+                  {p.direct.length === 0 && <span className="muted">Nenhum setor</span>}
+                </span>
+                {v.can_share && free.length > 0 && (
+                  <select
+                    className="select"
+                    style={{ width: "auto" }}
+                    value=""
+                    disabled={busy}
+                    aria-label={`Compartilhar ${p.name} com outro setor`}
+                    onChange={(e) => e.target.value && direct.mutate({ id: p.id, unit: e.target.value, on: true })}
+                  >
+                    <option value="">Adicionar setor…</option>
+                    {free.map((u) => <option key={u.sigla} value={u.sigla}>{u.label}</option>)}
+                  </select>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      )}
+      {!v.can_share && !v.parent && <p className="muted" style={{ marginTop: 8 }}>Só o Gestor do espaço altera o compartilhamento.</p>}
+
       {v.received.length > 0 && (
         <>
-          <h3 style={{ marginTop: 16 }}>Recebidos das unidades abaixo</h3>
-          {v.parent && <p className="muted">Marque o que {parent} também deve ver. Recolher aqui recolhe também dos níveis acima.</p>}
+          <h3 style={{ marginTop: 16 }}>Recebidos de outras unidades</h3>
+          {v.parent && <p className="muted">Marque o que {parent} também deve ver. Recolher aqui recolhe também dos níveis acima. O que chegou direto de outro setor não se repassa.</p>}
           <ul className="task-list" style={{ marginTop: 8 }}>
             {v.received.map((p) => (
               <li key={p.id} className="task-row">
                 <span style={{ flex: 1 }}><Link to={`/projetos/${p.id}`}>{p.name}</Link> <span className="badge">de {p.origin_workspace}</span></span>
-                {v.parent && (
+                {v.parent && p.can_repass && (
                   <label className="row" style={{ gap: 6 }}>
                     <input type="checkbox" className="check" checked={p.shared_up} disabled={!v.can_share || busy} onChange={(e) => toggle.mutate({ id: p.id, on: e.target.checked })} aria-label={`Repassar ${p.name} a ${parent}`} />
                     Repassar a {parent}

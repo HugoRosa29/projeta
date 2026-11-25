@@ -59,3 +59,89 @@ export function projectProgress(p: { progress?: number | null; task_count: numbe
   if (p.progress != null) return { pct: p.progress, informed: true };
   return { pct: p.task_count ? Math.round((p.done_count / p.task_count) * 100) : 0, informed: false };
 }
+
+/** Soma dias a uma data de calendário (aaaa-mm-dd) sem passar por fuso: prazo é data, não instante. */
+export function addDays(iso: string, days: number): string {
+  const [y, m, d] = iso.split("-").map(Number);
+  return new Date(Date.UTC(y, m - 1, d + days)).toISOString().slice(0, 10);
+}
+
+/** Opções de "Adiar" contadas a partir de hoje no fuso da pessoa (o `today` vem do servidor). */
+export function postponeOptions(today: string): { label: string; date: string }[] {
+  return [
+    { label: "Amanhã", date: addDays(today, 1) },
+    { label: "Em 3 dias", date: addDays(today, 3) },
+    { label: "Em 1 semana", date: addDays(today, 7) },
+  ];
+}
+
+/** Data de calendário de hoje no fuso do navegador (o fuso da pessoa que está olhando). */
+export function localToday(now = new Date()): string {
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${now.getFullYear()}-${p(now.getMonth() + 1)}-${p(now.getDate())}`;
+}
+
+export interface ProjectRisk {
+  late: Task[];
+  blocked: Task[];
+  dueSoon: Task[];
+  /** Atrasadas, depois bloqueadas, depois as que vencem logo — sem repetir tarefa. */
+  attention: { task: Task; reason: "late" | "blocked" | "soon" }[];
+  /** Prazos de hoje até `soonDays` dias à frente, do mais próximo ao mais distante. */
+  upcoming: Task[];
+}
+
+/** O que precisa de atenção num projeto. Só conta tarefa em aberto; "logo" = nos próximos `soonDays` dias. */
+export function projectRisk(tasks: Task[], today: string, soonDays = 7): ProjectRisk {
+  const open = tasks.filter((t) => t.status !== "done");
+  const byDue = (a: Task, b: Task) => (a.due_date ?? "9999").localeCompare(b.due_date ?? "9999");
+  const limit = addDays(today, soonDays);
+  const late = open.filter((t) => t.due_date && t.due_date < today).sort(byDue);
+  const blocked = open.filter((t) => t.status === "blocked").sort(byDue);
+  const dueSoon = open.filter((t) => t.due_date && t.due_date >= today && t.due_date <= limit).sort(byDue);
+  const seen = new Set<string>();
+  const attention: ProjectRisk["attention"] = [];
+  for (const [list, reason] of [[late, "late"], [blocked, "blocked"], [dueSoon, "soon"]] as const) {
+    for (const task of list) {
+      if (seen.has(task.id)) continue;
+      seen.add(task.id);
+      attention.push({ task, reason });
+    }
+  }
+  const upcoming = open.filter((t) => t.due_date && t.due_date >= today && t.due_date <= limit).sort(byDue);
+  return { late, blocked, dueSoon, attention, upcoming };
+}
+
+/** Tarefas que podem virar dependência de `task` sem formar ciclo: do mesmo projeto, não ela
+ * mesma, não já ligadas e que não esperem (direta ou indiretamente) por `task`. O servidor faz a
+ * mesma checagem; aqui só se evita oferecer o que seria recusado. */
+export function dependencyCandidates(task: Task, all: Task[]): Task[] {
+  if (!task.project_id) return [];
+  const byId = new Map(all.map((t) => [t.id, t]));
+  const waitsOnTask = (start: string): boolean => {
+    const seen = new Set<string>();
+    const stack = [start];
+    while (stack.length) {
+      const id = stack.pop()!;
+      if (id === task.id) return true;
+      if (seen.has(id)) continue;
+      seen.add(id);
+      stack.push(...(byId.get(id)?.depends_on_ids ?? []));
+    }
+    return false;
+  };
+  const current = new Set(task.depends_on_ids ?? []);
+  return all.filter((c) => c.project_id === task.project_id && c.id !== task.id && !current.has(c.id) && !waitsOnTask(c.id));
+}
+
+/** Dependências cujo prazo cai depois do início desta tarefa (ou do prazo, sem início): o
+ * cronograma pede algo que ainda não terá terminado. Mesmo dia não conta (a anterior pode acabar
+ * de manhã), nem dependência já concluída. */
+export function scheduleConflicts(task: Task, all: Task[]): Task[] {
+  const begins = task.start_date ?? task.due_date;
+  if (!begins || task.status === "done") return [];
+  const byId = new Map(all.map((t) => [t.id, t]));
+  return (task.depends_on_ids ?? [])
+    .map((id) => byId.get(id))
+    .filter((d): d is Task => !!d && d.status !== "done" && !!d.due_date && d.due_date > begins);
+}

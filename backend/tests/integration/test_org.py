@@ -2,12 +2,21 @@
 
 import pytest
 
-from helpers import make_project, make_team, make_user
+from helpers import NOBODY, make_project, make_team, make_user
 from projeta.db import uow
 from projeta.errors import BadRequestError, ForbiddenError
-from projeta.identity import workspaces
+from projeta.identity import auth, workspaces
 from projeta.identity.access import project_access
 from projeta.work import comments, formal, org, projects, tasks
+
+# Titulares da planilha (migração 019), como estão lá.
+HEADS = {
+    "DISID": "Romildo Ribeiro dos Santos",
+    "DIRAU": "Daniel Reis Santos",
+    "COTIN": "Júlio Cézar Schettini Henriques",
+    "COINT": "Luiz Cláudio de Freitas",
+    "GEPES": "Juracir Santos Júnior",
+}
 
 
 def _unit_ws(user: dict) -> str:
@@ -22,15 +31,15 @@ def _sees(user: dict, ws: str, pid: str) -> bool:
 
 @pytest.fixture
 def org_tree():
-    """DISID e DIRAU sob COTIN, sob COINT. Primeira pessoa de cada lotação é a Gestora."""
-    disid, disid2 = make_user("disid1", allotment="DISID"), make_user("disid2", allotment="disid")
-    dirau = make_user("dirau1", allotment="COINT/COTIN/DIRAU")
-    cotin, cotin_ger = (
-        make_user("cotin1", allotment="COTIN"),
-        make_user("cotin2", allotment="COTIN"),
-    )
+    """DISID e DIRAU sob COTIN, sob COINT. A primeira pessoa de cada lotação é a titular da
+    unidade (migração 019), portanto a Gestora."""
+    disid = make_user("disid1", allotment="DISID", full_name=HEADS["DISID"])
+    disid2 = make_user("disid2", allotment="disid")
+    dirau = make_user("dirau1", allotment="COINT/COTIN/DIRAU", full_name=HEADS["DIRAU"])
+    cotin = make_user("cotin1", allotment="COTIN", full_name=HEADS["COTIN"])
+    cotin_ger = make_user("cotin2", allotment="COTIN")
     cotin_leitor = make_user("cotin3", allotment="COTIN")
-    coint = make_user("coint1", allotment="COINT")
+    coint = make_user("coint1", allotment="COINT", full_name=HEADS["COINT"])
     t = {
         "disid": disid,
         "disid2": disid2,
@@ -50,7 +59,7 @@ def org_tree():
     return t
 
 
-def test_espaco_da_lotacao_e_a_unidade_e_a_primeira_pessoa_e_gestora(org_tree):
+def test_espaco_da_lotacao_e_a_unidade_e_a_titular_e_gestora(org_tree):
     with uow(org_tree["disid"]["id"]) as ctx:
         v = org.org_view(ctx, org_tree["ws_disid"])
         roles = {w["id"]: w["role"] for w in workspaces.list_my_workspaces(ctx)}
@@ -171,3 +180,127 @@ def test_mesma_unidade_com_lotacao_escrita_diferente_nao_vira_segundo_espaco_ofi
 def test_membro_de_outro_espaco_nao_le_a_organizacao(org_tree):
     with uow(org_tree["coint"]["id"]) as ctx, pytest.raises(ForbiddenError):
         org.org_view(ctx, org_tree["ws_disid"])
+
+
+def _role(user: dict, ws: str) -> str | None:
+    with uow(user["id"]) as ctx:
+        return next((w["role"] for w in workspaces.list_my_workspaces(ctx) if w["id"] == ws), None)
+
+
+def test_quem_entra_primeiro_nao_vira_gestor_se_a_unidade_tem_titular():
+    primeiro = make_user("diseg1", allotment="DISEG")
+    ws = _unit_ws(primeiro)
+    assert _role(primeiro, ws) == "manager"
+    # Espaço sem titular cadastrado mantém a regra antiga (ADR 0004).
+    solto = make_user("getin1", allotment="GETIN")
+    assert _role(solto, _unit_ws(solto)) == "admin"
+
+
+def test_titular_vira_gestor_mesmo_entrando_depois_e_com_o_nome_escrito_diferente():
+    primeiro = make_user("disid1", allotment="DISID")
+    ws = _unit_ws(primeiro)
+    # O GIA devolve em maiúsculas, sem acento e com espaço sobrando.
+    titular = make_user("romildo", allotment="DISID", full_name="  ROMILDO  RIBEIRO DOS SANTOS ")
+    assert _role(titular, ws) == "admin"
+    assert _role(primeiro, ws) == "manager"
+
+
+def test_titular_de_unidade_fora_da_propria_lotacao_vira_gestor_dela():
+    # Quem responde pela GEPES está lotado em outra unidade; o espaço da GEPES pode existir
+    # antes ou depois da entrada dele.
+    titular = make_user("juracir", allotment="DISEG", full_name=HEADS["GEPES"])
+    lotado = make_user("gepes1", allotment="GEPES")
+    ws_gepes = _unit_ws(lotado)
+    assert _role(titular, ws_gepes) == "admin"
+    assert _role(lotado, ws_gepes) == "manager"
+
+
+def test_titular_rebaixado_volta_a_gestor_na_proxima_entrada():
+    titular = make_user("cotin1", allotment="COTIN", full_name=HEADS["COTIN"])
+    outro = make_user("cotin2", allotment="COTIN")
+    ws = _unit_ws(titular)
+    with uow(titular["id"]) as ctx:
+        workspaces.set_member_role(ctx, ws, outro["id"], "admin")
+    with uow(outro["id"]) as ctx:
+        workspaces.set_member_role(ctx, ws, titular["id"], "manager")
+    make_user("cotin1", allotment="COTIN", full_name=HEADS["COTIN"])
+    assert _role(titular, ws) == "admin"
+
+
+def test_conta_local_com_o_nome_do_titular_nao_vira_gestor():
+    with uow(NOBODY) as ctx:
+        falso = auth.register(ctx, HEADS["DISID"], "falso@ex.com", "senha-longa-1")
+    lotado = make_user("disid1", allotment="DISID")
+    ws = _unit_ws(lotado)
+    assert _role(falso, ws) is None
+
+
+@pytest.fixture
+def lateral(org_tree):
+    """GEPES (outra diretoria) e o titular dela; DIRAF fica acima da GEPES."""
+    t = dict(org_tree)
+    t["gepes"] = make_user("juracir", allotment="GEPES", full_name=HEADS["GEPES"])
+    t["gepes_ger"] = make_user("gepes2", allotment="GEPES")
+    t["diraf"] = make_user("diraf1", allotment="DIRAF", full_name="Kaline Gonzaga Costa")
+    t["ws_gepes"], t["ws_diraf"] = _unit_ws(t["gepes"]), _unit_ws(t["diraf"])
+    return t
+
+
+def test_compartilhar_direto_com_setor_fora_da_hierarquia_da_so_leitura(lateral):
+    t = lateral
+    with uow(t["disid"]["id"]) as ctx:
+        org.share_direct(ctx, t["ws_disid"], t["pid"], "GEPES")
+        own = org.org_view(ctx, t["ws_disid"])["own"]
+    assert next(p for p in own if p["id"] == t["pid"])["direct"] == ["GEPES"]
+    assert _sees(t["gepes"], t["ws_gepes"], t["pid"])
+    assert _sees(t["gepes_ger"], t["ws_gepes"], t["pid"])  # Gerente tem org.view_shared
+    with uow(t["gepes"]["id"]) as ctx:
+        a = project_access(ctx, t["pid"])
+        assert not (a.can_write or a.can_manage or a.can_comment)
+        with pytest.raises(ForbiddenError):
+            tasks.update_task(ctx, t["tid"], {"title": "Mudou"})
+    # Não sobe pela hierarquia de quem recebeu, nem para a de quem mandou.
+    assert not _sees(t["diraf"], t["ws_diraf"], t["pid"])
+    assert not _sees(t["cotin"], t["ws_cotin"], t["pid"])
+
+
+def test_quem_recebeu_direto_nao_repassa(lateral):
+    t = lateral
+    with uow(t["disid"]["id"]) as ctx:
+        org.share_direct(ctx, t["ws_disid"], t["pid"], "GEPES")
+    with uow(t["gepes"]["id"]) as ctx:
+        received = org.org_view(ctx, t["ws_gepes"])["received"]
+        assert [(r["id"], r["can_repass"]) for r in received] == [(t["pid"], False)]
+        with pytest.raises(ForbiddenError):
+            org.share_up(ctx, t["ws_gepes"], t["pid"])
+        with pytest.raises(ForbiddenError):
+            org.share_direct(ctx, t["ws_gepes"], t["pid"], "COINT")
+
+
+def test_so_o_gestor_do_espaco_dono_compartilha_direto(lateral):
+    t = lateral
+    with uow(t["disid2"]["id"]) as ctx, pytest.raises(ForbiddenError):
+        org.share_direct(ctx, t["ws_disid"], t["pid"], "GEPES")  # Gerente, não Gestor
+    with uow(t["gepes"]["id"]) as ctx, pytest.raises(ForbiddenError):
+        org.share_direct(ctx, t["ws_disid"], t["pid"], "GEPES")  # não é membro de DISID
+    with uow(t["gepes"]["id"]) as ctx, pytest.raises(ForbiddenError):
+        org.share_direct(ctx, t["ws_gepes"], t["pid"], "COINT")  # projeto de outro espaço
+    with uow(t["disid"]["id"]) as ctx:
+        for alvo in ("NAOEXISTE", "DISID", "COTIN"):  # inexistente, a própria, a de cima
+            with pytest.raises(BadRequestError):
+                org.share_direct(ctx, t["ws_disid"], t["pid"], alvo)
+
+
+def test_direto_e_hierarquia_para_a_mesma_unidade_se_desfazem_separados(lateral):
+    t = lateral
+    with uow(t["disid"]["id"]) as ctx:
+        org.share_direct(ctx, t["ws_disid"], t["pid"], "COINT")  # pula a COTIN
+        org.share_up(ctx, t["ws_disid"], t["pid"])
+    with uow(t["cotin"]["id"]) as ctx:
+        org.share_up(ctx, t["ws_cotin"], t["pid"])  # COINT também recebe pela hierarquia
+        org.unshare_up(ctx, t["ws_cotin"], t["pid"])
+    assert _sees(t["coint"], t["ws_coint"], t["pid"])  # o direto continua
+    with uow(t["disid"]["id"]) as ctx:
+        org.unshare_direct(ctx, t["ws_disid"], t["pid"], "COINT")
+    assert not _sees(t["coint"], t["ws_coint"], t["pid"])
+    assert _sees(t["cotin"], t["ws_cotin"], t["pid"])

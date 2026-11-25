@@ -7,7 +7,16 @@ from ...errors import BadRequestError
 from ...identity import workspaces as svc
 from ...work import org, transfer
 from ..deps import current_user
-from ..schemas import InviteIn, PermissionsIn, PrefsIn, RoleIn, ShareIn, WorkspaceIn, WorkspacePatch
+from ..schemas import (
+    DirectShareIn,
+    InviteIn,
+    PermissionsIn,
+    PrefsIn,
+    RoleIn,
+    ShareIn,
+    WorkspaceIn,
+    WorkspacePatch,
+)
 
 router = APIRouter(tags=["workspaces"])
 
@@ -132,6 +141,22 @@ def share(workspace_id: str, body: ShareIn, user: dict = Depends(current_user)) 
 def unshare(workspace_id: str, project_id: str, user: dict = Depends(current_user)) -> None:
     with uow(user["id"]) as ctx:
         org.unshare_up(ctx, workspace_id, project_id)
+
+
+@router.post("/workspaces/{workspace_id}/org/direct-shares", status_code=204)
+def share_direct(
+    workspace_id: str, body: DirectShareIn, user: dict = Depends(current_user)
+) -> None:
+    with uow(user["id"]) as ctx:
+        org.share_direct(ctx, workspace_id, body.project_id, body.unit)
+
+
+@router.delete("/workspaces/{workspace_id}/org/direct-shares/{project_id}/{unit}", status_code=204)
+def unshare_direct(
+    workspace_id: str, project_id: str, unit: str, user: dict = Depends(current_user)
+) -> None:
+    with uow(user["id"]) as ctx:
+        org.unshare_direct(ctx, workspace_id, project_id, unit)
 
 
 @router.post("/workspaces/{workspace_id}/org/share-all")

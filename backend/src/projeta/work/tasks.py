@@ -16,12 +16,18 @@ from ..identity.access import (
     task_access,
 )
 from .activity import log_activity
+from .sprints import assert_target, move_tasks
 
 STATUSES = ("todo", "doing", "blocked", "done")
-PRIORITIES = ("low", "medium", "high")
+PRIORITIES = ("low", "medium", "high", "urgent")
+# Ordem de exibição: urgente primeiro.
+PRIORITY_ORDER = (
+    "CASE t.priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END"
+)
 EDITABLE = (
-    "title", "description", "status", "priority", "assignee_id", "due_date", "estimate_minutes",
-    "progress", "phase", "is_milestone", "labels", "position", "parent_id",
+    "title", "description", "status", "priority", "assignee_id", "start_date", "due_date",
+    "estimate_minutes",
+    "progress", "phase", "is_milestone", "labels", "position", "parent_id", "sprint_id",
 )  # fmt: skip
 
 
@@ -51,12 +57,22 @@ def validate(fields: dict[str, Any], creating: bool) -> None:
         raise BadRequestError("Prioridade inválida")
     if fields.get("due_date") and not _valid_date(fields["due_date"]):
         raise BadRequestError("Prazo inválido (use AAAA-MM-DD)")
+    if fields.get("start_date") and not _valid_date(fields["start_date"]):
+        raise BadRequestError("Data de início inválida (use AAAA-MM-DD)")
     p = fields.get("progress")
     if p is not None and not (isinstance(p, int) and 0 <= p <= 100):
         raise BadRequestError("O progresso deve ficar entre 0 e 100")
     e = fields.get("estimate_minutes")
     if e is not None and not (isinstance(e, int) and e >= 0):
         raise BadRequestError("Estimativa inválida")
+
+
+def _assert_start_before_due(start: str | None, due: str | None) -> None:
+    """Datas ISO comparam como texto. O banco tem o mesmo CHECK; aqui a mensagem é legível."""
+    if start and due and start > due:
+        raise BadRequestError(
+            "A data de início fica depois do prazo. Antecipe o início ou adie o prazo."
+        )
 
 
 def _assert_assignable(ctx: Ctx, project_id: str, assignee_id: str) -> None:
@@ -111,6 +127,7 @@ def create_task(
 ) -> dict:
     """project_id nulo = tarefa pessoal do usuário no espaço (privada)."""
     validate(fields, creating=True)
+    _assert_start_before_due(fields.get("start_date"), fields.get("due_date"))
     ws_id = workspace_id
     if project_id:
         a = project_access(ctx, project_id)
@@ -141,12 +158,22 @@ def create_task(
             },
             parent_id,
         )
+    sprint_id = fields.get("sprint_id") or None
+    if parent_id:
+        # Subtarefa acompanha a sprint da mãe, seja qual for a enviada.
+        mother = ctx.one("SELECT sprint_id FROM tasks WHERE id=%s", (parent_id,))
+        assert mother
+        sprint_id = str(mother["sprint_id"]) if mother["sprint_id"] else None
+    elif sprint_id:
+        if not project_id:
+            raise BadRequestError("Tarefa pessoal não entra em sprint. Crie a tarefa no projeto.")
+        assert_target(ctx, project_id, sprint_id)
     status = fields.get("status") or "todo"
     row = ctx.one(
         """INSERT INTO tasks(workspace_id, project_id, owner_id, title, description, status, priority,
              assignee_id, due_date, estimate_minutes, progress, phase, is_milestone, labels, position,
-             created_by, completed_at, parent_id)
-           VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
+             created_by, completed_at, parent_id, start_date)
+           VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
         (
             ws_id,
             project_id,
@@ -166,9 +193,12 @@ def create_task(
             ctx.user_id,
             datetime.now(UTC) if status == "done" else None,
             parent_id or None,
+            fields.get("start_date") or None,
         ),
     )
     assert row
+    if sprint_id:
+        move_tasks(ctx, [str(row["id"])], sprint_id)
     task = ctx.one(f"{TASK_SELECT} WHERE t.id=%s", (row["id"],))
     assert task
     if project_id:
@@ -243,7 +273,7 @@ def list_my_tasks(
     # VISIBLE_PROJECT referencia o alias p, que TASK_SELECT já traz (LEFT JOIN projects p).
     return ctx.all(
         f"{TASK_SELECT} WHERE {' AND '.join(where)} ORDER BY t.due_date NULLS LAST, "
-        "CASE t.priority WHEN 'high' THEN 0 WHEN 'medium' THEN 1 ELSE 2 END, t.created_at",
+        f"{PRIORITY_ORDER}, t.created_at",
         params,
     )
 
@@ -251,18 +281,26 @@ def list_my_tasks(
 def get_task(ctx: Ctx, task_id: str) -> dict:
     a = task_access(ctx, task_id)
     deps = ctx.all(
-        "SELECT d.depends_on_id AS id, t.title, t.status FROM task_dependencies d "
-        "JOIN tasks t ON t.id = d.depends_on_id WHERE d.task_id = %s",
+        "SELECT d.depends_on_id AS id, t.title, t.status, t.due_date::text AS due_date "
+        "FROM task_dependencies d JOIN tasks t ON t.id = d.depends_on_id WHERE d.task_id = %s "
+        "ORDER BY t.title",
         (task_id,),
     )
     subtasks = ctx.all(
         f"{TASK_SELECT} WHERE t.parent_id = %s ORDER BY t.position, t.created_at", (task_id,)
+    )
+    # O que espera por esta tarefa: tarefas do mesmo projeto (a dependência só existe dentro dele).
+    blocks = ctx.all(
+        "SELECT d.task_id AS id, t.title, t.status FROM task_dependencies d "
+        "JOIN tasks t ON t.id = d.task_id WHERE d.depends_on_id = %s ORDER BY t.title",
+        (task_id,),
     )
     return {
         "task": a.task,
         "can_write": a.can_write,
         "can_comment": a.can_comment,
         "depends_on": deps,
+        "blocks": blocks,
         "subtasks": subtasks,
     }
 
@@ -288,12 +326,41 @@ def update_task(
             "A tarefa foi alterada por outra pessoa. Recarregue para ver a versão atual.",
             {"current": task},
         )
+    for k in ("start_date", "due_date"):
+        if k in fields and not fields[k]:
+            fields[k] = None  # "" = limpar a data, como nulo
+    _assert_start_before_due(
+        fields["start_date"] if "start_date" in fields else task["start_date"],
+        fields["due_date"] if "due_date" in fields else task["due_date"],
+    )
     if fields.get("assignee_id"):
         if not task["project_id"]:
             raise BadRequestError("Tarefas pessoais não têm responsável")
         _assert_assignable(ctx, task["project_id"], fields["assignee_id"])
     if fields.get("parent_id"):
         _assert_parent(ctx, task, fields["parent_id"])
+
+    # Sprint: muda por move_tasks (registra entrada/saída e leva as subtarefas junto).
+    new_sprint: str | None = None
+    sprint_changed = False
+    if "sprint_id" in fields:
+        wanted = fields.pop("sprint_id") or None
+        if str(task["sprint_id"] or "") != (wanted or ""):
+            if not task["project_id"]:
+                raise BadRequestError("Tarefa pessoal não entra em sprint. Mova-a para um projeto.")
+            if task["parent_id"] and "parent_id" not in fields:
+                raise BadRequestError(
+                    "A subtarefa acompanha a sprint da tarefa-mãe. Mude a sprint da tarefa-mãe."
+                )
+            if wanted:
+                assert_target(ctx, str(task["project_id"]), wanted)
+            new_sprint, sprint_changed = wanted, True
+    if fields.get("parent_id"):
+        # Virou subtarefa: passa a acompanhar a sprint da mãe.
+        mother = ctx.one("SELECT sprint_id FROM tasks WHERE id=%s", (fields["parent_id"],))
+        assert mother
+        new_sprint = str(mother["sprint_id"]) if mother["sprint_id"] else None
+        sprint_changed = str(task["sprint_id"] or "") != (new_sprint or "")
 
     sets: dict[str, Any] = {k: v for k, v in fields.items() if k != "status"}
     if "title" in sets:
@@ -307,13 +374,16 @@ def update_task(
         elif task["status"] == "done":
             sets["completed_at"] = None
             sets.setdefault("progress", min(task["progress"], 90))
-    if not sets:
+    if not sets and not sprint_changed:
         return task
-    cols = ", ".join(f"{c} = %({c})s" for c in sets)
-    ctx.run(
-        f"UPDATE tasks SET {cols}, version = version + 1, updated_at = now() WHERE id = %(_id)s",
-        {**sets, "_id": task_id},
-    )
+    if sets:
+        cols = ", ".join(f"{c} = %({c})s" for c in sets)
+        ctx.run(
+            f"UPDATE tasks SET {cols}, version = version + 1, updated_at = now() WHERE id = %(_id)s",
+            {**sets, "_id": task_id},
+        )
+    if sprint_changed:
+        move_tasks(ctx, [task_id], new_sprint)
     after = ctx.one(f"{TASK_SELECT} WHERE t.id=%s", (task_id,))
     assert after
     if task["project_id"]:
@@ -324,9 +394,11 @@ def update_task(
                 "status",
                 "priority",
                 "assignee_id",
+                "start_date",
                 "due_date",
                 "progress",
                 "parent_id",
+                "sprint_id",
             )
             if task[k] != after[k]
         }
@@ -465,6 +537,6 @@ def search_visible(
         params["q"] = _title_contains(query)
     return ctx.all(
         f"{TASK_SELECT} WHERE {' AND '.join(where)} ORDER BY t.due_date NULLS LAST, "
-        "CASE t.priority WHEN 'high' THEN 0 WHEN 'medium' THEN 1 ELSE 2 END, t.created_at LIMIT %(lim)s",
+        f"{PRIORITY_ORDER}, t.created_at LIMIT %(lim)s",
         params,
     )

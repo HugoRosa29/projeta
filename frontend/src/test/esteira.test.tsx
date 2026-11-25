@@ -1,10 +1,7 @@
-import { render, screen, within } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
-import { MemoryRouter } from "react-router";
 import { describe, expect, it } from "vitest";
 import { paceCounts, parseDate, stageGroups, timelineSpan, track } from "../domain/esteira";
 import type { PortfolioRow } from "../domain/formal";
-import { Esteira } from "../features/today/Esteira";
+import { daysText, elapsed, groupTracks, rangeText, type GroupBy } from "../domain/board";
 
 const TODAY = "2026-11-16";
 
@@ -83,32 +80,41 @@ describe("datas da esteira", () => {
   });
 });
 
-describe("Esteira", () => {
+describe("quadro do panorama", () => {
   const ROWS = [
     row({ id: "ERP", phase: "execution", progress: 20, attributes: [field("Início", "01/01/2026"), field("Data prevista", "30/06/2026")] }),
     row({ id: "Portal", phase: "initiation", attributes: [field("Data prevista", "31/03/2027")] }),
     row({ id: "Intranet", first_due: "2026-10-01", last_due: "2027-02-01" }),
   ];
-  const show = () => render(<MemoryRouter><Esteira rows={ROWS} today={TODAY} /></MemoryRouter>);
+  const tracks = ROWS.map((r) => track(r, TODAY));
+  const view = (by: GroupBy) => groupTracks(tracks, by).map((g) => [g.label, g.tracks.map((t) => t.row.id)]);
 
   // Intranet: 37% do prazo (pelas tarefas) decorrido e nada concluído = ritmo abaixo do previsto.
-  it("mostra as fases com contagem e alerta, e a timeline com links", () => {
-    show();
-    const fases = screen.getByRole("list", { name: "Fases" });
-    expect(within(fases).getByRole("button", { name: "Execução: 1 projeto, 1 com atenção" })).toBeInTheDocument();
-    expect(within(fases).getByRole("button", { name: "Sem fase definida: 1 projeto, 1 com atenção" })).toBeInTheDocument();
-    const tl = screen.getByRole("table", { name: "Timeline dos projetos" });
-    expect(within(tl).getAllByRole("row").slice(1).map((r) => within(r).getByRole("link").textContent)).toEqual(["ERP", "Intranet", "Portal"]);
-    expect(within(tl).getByText(/vencido há 139 dias/)).toBeInTheDocument();
+  it("agrupa por prazo e por fase, só com grupos que têm projeto, o mais urgente primeiro", () => {
+    expect(view("pace")).toEqual([["Prazo vencido", ["ERP"]], ["Ritmo abaixo do previsto", ["Intranet"]], ["No prazo", ["Portal"]]]);
+    expect(view("phase")).toEqual([["Iniciação", ["Portal"]], ["Execução", ["ERP"]], ["Sem fase definida", ["Intranet"]]]);
+    expect(daysText(tracks[0])).toBe("vencido há 139 dias");
+    expect(daysText({ daysLeft: 1 })).toBe("faltam 1 dia");
   });
 
-  it("filtra a timeline pela fase e pela situação do prazo", async () => {
-    show();
-    await userEvent.click(screen.getByRole("button", { name: /^Iniciação: 1 projeto/ }));
-    const tl = () => screen.getByRole("table", { name: "Timeline dos projetos" });
-    expect(within(tl()).getAllByRole("link").map((a) => a.textContent)).toEqual(["Portal"]);
-    await userEvent.click(screen.getByRole("button", { name: "Limpar seleção" }));
-    await userEvent.click(screen.getByRole("button", { name: /Prazo vencido/ }));
-    expect(within(tl()).getAllByRole("link").map((a) => a.textContent)).toEqual(["ERP"]);
+  it("dá cor de significado à situação e cores de categoria em sequência à fase", () => {
+    expect(groupTracks(tracks, "pace").map((g) => g.color)).toEqual(["red", "orange", "green"]);
+    expect(groupTracks(tracks, "phase").map((g) => g.color)).toEqual(["blue", "purple", "gray"]);
+  });
+
+  it("escreve o período da pílula e quanto dele já passou", () => {
+    expect(rangeText("2026-01-01", "2026-06-30", TODAY)).toBe("1 jan – 30 jun");
+    expect(rangeText("2026-10-01", "2027-02-01", TODAY)).toBe("1 out/26 – 1 fev/27");
+    expect(rangeText(null, null, TODAY)).toBe("sem data");
+    expect(elapsed("2026-11-06", "2026-11-26", TODAY)).toBe(0.5);
+    expect(elapsed(null, "2026-01-01", TODAY)).toBe(1);
+  });
+
+  it("agrupa por campo livre com o maior grupo primeiro e '(sem valor)' por último", () => {
+    expect(view("field:Data prevista")).toEqual([
+      ["30/06/2026", ["ERP"]],
+      ["31/03/2027", ["Portal"]],
+      ["(sem valor)", ["Intranet"]],
+    ]);
   });
 });

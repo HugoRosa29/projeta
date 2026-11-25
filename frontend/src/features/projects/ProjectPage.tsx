@@ -1,9 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { CornerDownRight, ImagePlus, Trash2 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { CornerDownRight, FileText, Link2, History, ImagePlus, Trash2, Users } from "lucide-react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Link, useParams, useSearchParams } from "react-router";
 import { Hero } from "../../components/Hero";
-import { Empty, ErrorBox, Loading, useToast } from "../../components/ui";
+import { Dialog, Empty, ErrorBox, Loading, useToast } from "../../components/ui";
 import {
   ACTIVITY_LABEL,
   PRIORITY_LABEL,
@@ -22,12 +22,15 @@ import { api } from "../../services/api";
 import { useAnnounceProject } from "../../app/projectContext";
 import { useSession } from "../../app/session";
 import { useUpdateTask } from "../tasks/hooks";
-import { projectProgress, subtaskCounts } from "../../domain/work";
+import { localToday, projectProgress, projectRisk, subtaskCounts } from "../../domain/work";
 import { DueBadge, QuickAdd, SubtaskBadge, TaskDialog, TaskList, TaskTags } from "../tasks/TaskParts";
 import { coverUrl, useCoverActions } from "./cover";
 import { ProjectDetails } from "./ProjectDetails";
 import { FormalPanel } from "./FormalPanel";
+import { Timeline } from "./Timeline";
 import { InviteByMatricula } from "./InviteByMatricula";
+import { ActiveSprintCard, SprintsView } from "../sprints/SprintsView";
+import { useSprints } from "../sprints/hooks";
 
 interface ProjectData {
   project: Project;
@@ -40,6 +43,7 @@ interface ProjectData {
 
 const VIEWS = [
   ["visao", "Visão geral"],
+  ["sprints", "Sprints"],
   ["quadro", "Quadro"],
   ["lista", "Lista"],
   ["cronograma", "Cronograma"],
@@ -54,6 +58,7 @@ export function ProjectPage() {
   const qc = useQueryClient();
   const toast = useToast();
   const [open, setOpen] = useState<string | null>(null);
+  const [panel, setPanel] = useState<"ficha" | "equipe" | "historico" | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const { upload, remove } = useCoverActions(id);
   const taskParam = sp.get("task");
@@ -89,69 +94,124 @@ export function ProjectPage() {
   const archived = d.project.status === "archived";
   const canManageRole = d.can_manage || (archived && can(workspace, "project.manage"));
 
+  const taskViewsError = tasksQ.isError ? <ErrorBox error={tasksQ.error} onRetry={() => tasksQ.refetch()} /> : null;
+
   return (
-    <>
+    <div className={`project-shell ${view === "visao" ? "is-overview" : ""}`}>
       <Hero
+        compact
         eyebrow={<Link to="/projetos">Projetos</Link>}
         title={<>{d.project.name} {archived && <span className="badge">Arquivado</span>}</>}
         subtitle={d.project.summary || undefined}
         cover={d.project.cover_version ? coverUrl(id, d.project.cover_version) : undefined}
       >
-        {d.can_manage && (
-          <>
-            <input
-              ref={fileRef}
-              type="file"
-              accept="image/png,image/jpeg,image/webp"
-              className="sr-only"
-              tabIndex={-1}
-              aria-label="Escolher imagem do projeto"
-              onChange={(e) => {
-                const f = e.target.files?.[0];
-                e.target.value = "";
-                if (f) upload.mutate(f);
-              }}
-            />
-            <button className="btn btn-glass btn-sm" disabled={upload.isPending} onClick={() => fileRef.current?.click()}>
-              <ImagePlus size={16} aria-hidden /> {upload.isPending ? "Enviando…" : d.project.cover_version ? "Trocar imagem" : "Adicionar imagem"}
-            </button>
-            {d.project.cover_version && (
-              <button className="btn btn-glass btn-sm" disabled={remove.isPending} onClick={() => remove.mutate()}>
-                <Trash2 size={16} aria-hidden /> Remover imagem
-              </button>
-            )}
-          </>
-        )}
-        {canManageRole && (
-          <button className="btn btn-glass btn-sm" onClick={() => setStatus.mutate(archived ? "active" : "archived")}>
-            {archived ? "Reativar projeto" : "Arquivar projeto"}
-          </button>
-        )}
+        <button className="btn btn-glass btn-sm" onClick={() => setPanel("ficha")}>
+          <FileText size={16} aria-hidden /> Ficha do projeto
+        </button>
+        <button className="btn btn-glass btn-sm" onClick={() => setPanel("equipe")} aria-label={`Equipe do projeto: ${d.members.length} pessoa(s)`}>
+          <Users size={16} aria-hidden /> Equipe
+          <span className="pv-avatars" aria-hidden>
+            {d.members.slice(0, 3).map((m) => <span key={m.id} title={m.name}>{initials(m.name)}</span>)}
+            {d.members.length > 3 && <span>+{d.members.length - 3}</span>}
+          </span>
+        </button>
+        <button className="btn btn-glass btn-sm" onClick={() => setPanel("historico")}>
+          <History size={16} aria-hidden /> Histórico
+        </button>
       </Hero>
-      <nav className="tabs" aria-label="Visões do projeto">
-        {VIEWS.map(([v, label]) => (
-          <Link key={v} to={`?view=${v}`} aria-current={view === v ? "page" : undefined}>
-            {label}
-          </Link>
-        ))}
-      </nav>
+      {/* Abas e criação rápida dividem a mesma faixa: a altura que sobra fica para o trabalho. */}
+      <div className="project-bar">
+        <nav className="tabs" aria-label="Visões do projeto">
+          {VIEWS.map(([v, label]) => (
+            <Link key={v} to={`?view=${v}`} aria-current={view === v ? "page" : undefined}>
+              {label}
+            </Link>
+          ))}
+        </nav>
+        {d.can_write && view !== "visao" && <QuickAdd workspaceId={d.project.workspace_id} projectId={id} placeholder="Nova tarefa neste projeto…" />}
+      </div>
 
-      {d.can_write && view !== "visao" && <QuickAdd workspaceId={d.project.workspace_id} projectId={id} placeholder="Nova tarefa neste projeto…" />}
-      {view === "visao" && <Overview d={d} tasks={tasks} onOpen={setOpen} />}
-      {view === "quadro" && (tasksQ.isError ? <ErrorBox error={tasksQ.error} onRetry={() => tasksQ.refetch()} /> : <Board tasks={tasks} canWrite={d.can_write} onOpen={setOpen} />)}
-      {view === "lista" && <ListView tasks={tasks} members={d.members} onOpen={setOpen} />}
-      {view === "cronograma" && <Timeline tasks={tasks} onOpen={setOpen} />}
-      {view === "formal" && <FormalPanel project={d.project} members={d.members} canManage={d.can_manage} />}
+      <div className={`project-view pv-${view}`}>
+        {view === "visao" && <Overview d={d} tasks={tasks} onOpen={setOpen} onGoSprints={() => setSp({ view: "sprints" })} />}
+        {view === "sprints" && (taskViewsError ?? <SprintsView projectId={id} tasks={tasks} onOpen={setOpen} />)}
+        {view === "quadro" && (taskViewsError ?? <Board projectId={id} tasks={tasks} canWrite={d.can_write} onOpen={setOpen} />)}
+        {view === "lista" && <ListView projectId={id} tasks={tasks} members={d.members} canWrite={d.can_write} onOpen={setOpen} />}
+        {view === "cronograma" && (taskViewsError ?? <Timeline tasks={tasks} canWrite={d.can_write} onOpen={setOpen} />)}
+        {view === "formal" && <FormalPanel project={d.project} members={d.members} canManage={d.can_manage} />}
+      </div>
       {open && <TaskDialog taskId={open} members={d.members} onClose={closeTask} />}
-    </>
+
+      {/* Consulta e gestão ficam a um clique: a visão geral mostra só o que pede ação. */}
+      {panel === "ficha" && (
+        <Dialog title="Ficha do projeto" onClose={() => setPanel(null)} className="pv-dialog">
+          <ProjectDetails project={d.project} canManage={d.can_manage} />
+          {(d.can_manage || canManageRole) && (
+            <div className="row pv-dialog-actions">
+              {d.can_manage && (
+                <>
+                  <input
+                    ref={fileRef}
+                    type="file"
+                    accept="image/png,image/jpeg,image/webp"
+                    className="sr-only"
+                    tabIndex={-1}
+                    aria-label="Escolher imagem do projeto"
+                    onChange={(e) => {
+                      const f = e.target.files?.[0];
+                      e.target.value = "";
+                      if (f) upload.mutate(f);
+                    }}
+                  />
+                  <button className="btn btn-line btn-sm" disabled={upload.isPending} onClick={() => fileRef.current?.click()}>
+                    <ImagePlus size={16} aria-hidden /> {upload.isPending ? "Enviando…" : d.project.cover_version ? "Trocar imagem" : "Adicionar imagem"}
+                  </button>
+                  {d.project.cover_version && (
+                    <button className="btn btn-ghost btn-sm" disabled={remove.isPending} onClick={() => remove.mutate()}>
+                      <Trash2 size={16} aria-hidden /> Remover imagem
+                    </button>
+                  )}
+                </>
+              )}
+              <span className="grow" />
+              {canManageRole && (
+                <button className="btn btn-danger btn-sm" onClick={() => setStatus.mutate(archived ? "active" : "archived")}>
+                  {archived ? "Reativar projeto" : "Arquivar projeto"}
+                </button>
+              )}
+            </div>
+          )}
+        </Dialog>
+      )}
+      {panel === "equipe" && (
+        <Dialog title="Equipe do projeto" onClose={() => setPanel(null)} className="pv-dialog">
+          <TeamPanel d={d} />
+        </Dialog>
+      )}
+      {panel === "historico" && (
+        <Dialog title="Histórico do projeto" onClose={() => setPanel(null)} className="pv-dialog">
+          {d.activity.length === 0 ? <p className="muted">Sem atividade.</p> : (
+            <ul className="pv-activity">
+              {d.activity.map((a) => (
+                <li key={a.id}>
+                  <strong>{a.actor_name ?? "Alguém"}</strong> {ACTIVITY_LABEL[a.kind] ?? a.kind}{typeof a.data.title === "string" && <> “{a.data.title}”</>}
+                  {a.via === "assistant" && <span className="badge info" style={{ marginLeft: 6 }}>via assistente</span>}
+                  <div className="coord">{new Date(a.created_at).toLocaleString("pt-BR")}</div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Dialog>
+      )}
+    </div>
   );
 }
 
-function Overview({ d, tasks, onOpen }: { d: ProjectData; tasks: Task[]; onOpen: (id: string) => void }) {
-  const total = tasks.length;
-  const done = d.stats.done ?? 0;
-  const { pct, informed } = projectProgress({ progress: d.project.progress, task_count: total, done_count: done });
-  const blocked = tasks.filter((t) => t.status === "blocked");
+function initials(name: string) {
+  const parts = name.trim().split(/\s+/);
+  return ((parts[0]?.[0] ?? "") + (parts.length > 1 ? parts[parts.length - 1][0] : "")).toUpperCase();
+}
+
+function TeamPanel({ d }: { d: ProjectData }) {
   const qc = useQueryClient();
   const { workspace } = useSession();
   const members = useQuery({ queryKey: ["ws-members", workspace.id], queryFn: () => api.get<{ members: Member[] }>(`/workspaces/${workspace.id}/members`), enabled: d.can_manage });
@@ -161,62 +221,148 @@ function Overview({ d, tasks, onOpen }: { d: ProjectData; tasks: Task[]; onOpen:
     onSuccess: () => qc.invalidateQueries({ queryKey: ["project"] }),
   });
   return (
-    <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))" }}>
-      <ProjectDetails project={d.project} canManage={d.can_manage} />
-      <section className="card">
-        <h2>Progresso</h2>
-        <p style={{ fontFamily: "var(--display)", fontSize: "2rem" }}>{pct}%</p>
-        <div className="progress" role="progressbar" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100} aria-label="Progresso do projeto"><span style={{ width: `${pct}%` }} /></div>
-        <p className="muted" style={{ marginTop: 6 }}>{informed ? `Informado pela gestão do projeto · ${done}/${total} tarefas concluídas` : `${done}/${total} tarefas concluídas`}</p>
-        <p className="task-meta" style={{ marginTop: 10 }}>
-          {STATUSES.map((s) => <span key={s} className="badge">{STATUS_LABEL[s]}: {d.stats[s] ?? 0}</span>)}
-        </p>
-        {total === 0 && <Empty title="Sem tarefas ainda">Crie a primeira no quadro ou descreva o objetivo ao assistente.</Empty>}
-      </section>
-      <section className="card">
-        <h2>Bloqueios</h2>
-        {blocked.length ? <TaskList tasks={blocked} onOpen={onOpen} /> : <p className="muted">Nenhuma tarefa bloqueada.</p>}
-      </section>
-      <section className="card">
-        <h2>Equipe do projeto</h2>
-        <ul className="task-list" style={{ marginTop: 10 }}>
-          {d.members.map((m) => <li key={m.id} className="task-row">{m.name} <span className="muted">{m.email}</span></li>)}
-        </ul>
-        {d.can_manage && addable.length > 0 && (
-          <div className="field" style={{ marginTop: 12 }}>
-            <label htmlFor="add-member">Adicionar pessoa do espaço</label>
-            <select id="add-member" className="select" value="" onChange={(e) => e.target.value && add.mutate(e.target.value)}>
-              <option value="">Escolher…</option>
-              {addable.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
-            </select>
+    <>
+      <ul className="pv-people">
+        {d.members.map((m) => <li key={m.id}><strong>{m.name}</strong> <span className="muted">{m.email}</span></li>)}
+      </ul>
+      {d.can_manage && addable.length > 0 && (
+        <div className="field" style={{ marginTop: 14 }}>
+          <label htmlFor="add-member">Adicionar pessoa do espaço</label>
+          <select id="add-member" className="select" value="" onChange={(e) => e.target.value && add.mutate(e.target.value)}>
+            <option value="">Escolher…</option>
+            {addable.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+          </select>
+        </div>
+      )}
+      {d.can_manage && <InviteByMatricula projectId={d.project.id} />}
+    </>
+  );
+}
+
+const REASON = { late: ["Atrasada", "alerta"], blocked: ["Bloqueada", "alerta"], soon: ["Vence logo", "warn"] } as const;
+
+/** Linha enxuta dos cartões da visão geral: marcador à esquerda, título, responsável. */
+function PvRow({ task, lead, onOpen }: { task: Task; lead: ReactNode; onOpen: (id: string) => void }) {
+  return (
+    <li>
+      <button className="pv-row" onClick={() => onOpen(task.id)}>
+        <span className="pv-row-lead">{lead}</span>
+        <span className="pv-row-title">{task.is_milestone ? "◆ " : ""}{task.title}</span>
+        {task.assignee_name && <span className="pv-row-meta">{task.assignee_name}</span>}
+      </button>
+    </li>
+  );
+}
+
+/** Visão geral: o que está em risco, o que vem a seguir e o que é meu. Ficha, equipe e histórico
+ * ficam nos botões do cabeçalho. */
+function Overview({ d, tasks, onOpen, onGoSprints }: { d: ProjectData; tasks: Task[]; onOpen: (id: string) => void; onGoSprints: () => void }) {
+  const { user } = useSession();
+  const total = tasks.length;
+  const done = d.stats.done ?? 0;
+  const { pct, informed } = projectProgress({ progress: d.project.progress, task_count: total, done_count: done });
+  const today = localToday();
+  const risk = projectRisk(tasks, today);
+  const mine = tasks
+    .filter((t) => t.assignee_id === user.id && t.status !== "done")
+    .sort((a, b) => (a.due_date ?? "9999").localeCompare(b.due_date ?? "9999"));
+  const openByStatus = STATUSES.filter((s) => s !== "done" && (d.stats[s] ?? 0) > 0)
+    .map((s) => `${d.stats[s]} ${STATUS_LABEL[s].toLowerCase()}`)
+    .join(" · ");
+  const kpis = [
+    ["Atrasadas", risk.late.length, "alerta"],
+    ["Bloqueadas", risk.blocked.length, "alerta"],
+    ["Vencem em 7 dias", risk.dueSoon.length, "warn"],
+  ] as const;
+  return (
+    <div className="pv-overview">
+      <div className="pv-kpis">
+        <section className="pv-kpi pv-kpi-progress" aria-label={`Progresso: ${pct}%`}>
+          <span className="coord">Progresso{informed ? " informado" : ""}</span>
+          <strong>{pct}%</strong>
+          <div className="progress" role="progressbar" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100} aria-label="Progresso do projeto"><span style={{ width: `${pct}%` }} /></div>
+          <span className="pv-kpi-note">{done} de {total} tarefas concluídas{openByStatus && ` · ${openByStatus}`}</span>
+        </section>
+        {kpis.map(([label, n, tone]) => (
+          <section key={label} className={`pv-kpi ${n > 0 ? tone : "zero"}`} aria-label={`${label}: ${n}`}>
+            <span className="coord">{label}</span>
+            <strong>{n}</strong>
+          </section>
+        ))}
+      </div>
+      <div className="pv-cols">
+        <section className="card pane">
+          <h2>Precisa de atenção {risk.attention.length > 0 && <span className="badge alerta">{risk.attention.length}</span>}</h2>
+          <div className="pane-body">
+            {risk.attention.length === 0 ? <p className="muted">Nada atrasado, bloqueado ou vencendo nos próximos 7 dias.</p> : (
+              <ul className="pv-rows">
+                {risk.attention.map(({ task, reason }) => (
+                  <PvRow key={task.id} task={task} onOpen={onOpen} lead={<span className={`badge ${REASON[reason][1]}`}>{REASON[reason][0]}{task.due_date ? ` · ${fmtDate(task.due_date)}` : ""}</span>} />
+                ))}
+              </ul>
+            )}
           </div>
-        )}
-        {d.can_manage && <InviteByMatricula projectId={d.project.id} />}
-      </section>
-      <section className="card">
-        <h2>Atividade recente</h2>
-        {d.activity.length === 0 ? <p className="muted">Sem atividade.</p> : (
-          <ul className="task-list" style={{ marginTop: 10 }}>
-            {d.activity.map((a) => (
-              <li key={a.id} className="task-row" style={{ display: "block" }}>
-                <strong>{a.actor_name ?? "Alguém"}</strong> {ACTIVITY_LABEL[a.kind] ?? a.kind}{typeof a.data.title === "string" && <> “{a.data.title}”</>}
-                {a.via === "assistant" && <span className="badge info" style={{ marginLeft: 6 }}>via assistente</span>}
-                <div className="coord">{new Date(a.created_at).toLocaleString("pt-BR")}</div>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
+        </section>
+        <section className="card pane">
+          <h2>Próximas entregas <span className="coord">7 dias</span></h2>
+          <div className="pane-body">
+            {risk.upcoming.length === 0 ? <p className="muted">Nenhuma entrega prevista para os próximos 7 dias.</p> : (
+              <ul className="pv-rows">
+                {risk.upcoming.map((t) => (
+                  <PvRow key={t.id} task={t} onOpen={onOpen} lead={<span className={`pv-date ${t.due_date === today ? "today" : ""}`}>{t.due_date === today ? "Hoje" : fmtDate(t.due_date)}</span>} />
+                ))}
+              </ul>
+            )}
+          </div>
+        </section>
+        <div className="pv-col">
+          <section className="card pane">
+            <h2>Minhas tarefas {mine.length > 0 && <span className="badge">{mine.length}</span>}</h2>
+            <div className="pane-body">
+              {mine.length === 0 ? <p className="muted">Nada em aberto com você neste projeto.</p> : (
+                <ul className="pv-rows">
+                  {mine.map((t) => (
+                    <PvRow key={t.id} task={t} onOpen={onOpen} lead={<span className="pv-date">{t.due_date ? fmtDate(t.due_date) : "Sem prazo"}</span>} />
+                  ))}
+                </ul>
+              )}
+            </div>
+          </section>
+          <ActiveSprintCard projectId={d.project.id} onGo={onGoSprints} />
+        </div>
+      </div>
     </div>
   );
 }
 
-function Board({ tasks, canWrite, onOpen }: { tasks: Task[]; canWrite: boolean; onOpen: (id: string) => void }) {
+/** Filtro de sprint do Quadro e da Lista: "" = todas, "backlog" = sem sprint, ou o id da sprint.
+ * Sem escolha da pessoa, o Quadro abre na sprint em andamento (o trabalho de agora). */
+function useSprintFilter(projectId: string, preferActive: boolean) {
+  const sprints = useSprints(projectId).data?.sprints ?? [];
+  const [choice, setChoice] = useState<string | null>(null);
+  const active = sprints.find((s) => s.status === "active");
+  const value = choice ?? (preferActive && active ? active.id : "");
+  const keep = (t: Task) => !value || (value === "backlog" ? !t.sprint_id : t.sprint_id === value);
+  const select = sprints.length > 0 && (
+    <select className="select grow" aria-label="Sprint" value={value} onChange={(e) => setChoice(e.target.value)}>
+      <option value="">Todas as sprints e o backlog</option>
+      <option value="backlog">Só o backlog (sem sprint)</option>
+      {sprints.map((s) => <option key={s.id} value={s.id}>{s.name}{s.status === "active" ? " (em andamento)" : s.status === "closed" ? " (encerrada)" : ""}</option>)}
+    </select>
+  );
+  return { keep, select };
+}
+
+function Board({ projectId, tasks: all, canWrite, onOpen }: { projectId: string; tasks: Task[]; canWrite: boolean; onOpen: (id: string) => void }) {
   const update = useUpdateTask();
   const [over, setOver] = useState<Status | null>(null);
-  const counts = subtaskCounts(tasks);
+  const filter = useSprintFilter(projectId, true);
+  const tasks = all.filter(filter.keep);
+  const counts = subtaskCounts(all);
   const move = (t: Task, status: Status) => t.status !== status && update.mutate({ task: t, patch: { status } });
   return (
+    <div className="pv-stack">
+    {filter.select && <div className="pv-toolbar">{filter.select}</div>}
     <div className="board">
       {STATUSES.map((s) => {
         const col = tasks.filter((t) => t.status === s);
@@ -237,7 +383,7 @@ function Board({ tasks, canWrite, onOpen }: { tasks: Task[]; canWrite: boolean; 
             <h3>
               {STATUS_LABEL[s]} <span className="badge">{col.length}</span>
             </h3>
-            <ul>
+            <ul className="column-list">
               {col.map((t) => (
                 <li key={t.id} className={`kcard prio-${t.priority}`} draggable={canWrite} onDragStart={(e) => e.dataTransfer.setData("text/plain", t.id)}>
                   <button className="title" onClick={() => onOpen(t.id)}>{t.is_milestone ? "◆ " : ""}{t.title}</button>
@@ -255,16 +401,18 @@ function Board({ tasks, canWrite, onOpen }: { tasks: Task[]; canWrite: boolean; 
                   )}
                 </li>
               ))}
+              {col.length === 0 && <li className="muted column-empty">{canWrite ? "Arraste uma tarefa para cá." : "Vazio."}</li>}
             </ul>
-            {col.length === 0 && <p className="muted" style={{ fontSize: "0.8125rem" }}>{canWrite ? "Arraste uma tarefa para cá." : "Vazio."}</p>}
           </section>
         );
       })}
     </div>
+    </div>
   );
 }
 
-function ListView({ tasks, members, onOpen }: { tasks: Task[]; members: Member[]; onOpen: (id: string) => void }) {
+function ListView({ projectId, tasks, members, canWrite, onOpen }: { projectId: string; tasks: Task[]; members: Member[]; canWrite: boolean; onOpen: (id: string) => void }) {
+  const sprint = useSprintFilter(projectId, false);
   const [status, setStatus] = useState("");
   const [priority, setPriority] = useState("");
   const [assignee, setAssignee] = useState("");
@@ -274,11 +422,12 @@ function ListView({ tasks, members, onOpen }: { tasks: Task[]; members: Member[]
       (!status || t.status === status) &&
       (!priority || t.priority === priority) &&
       (!assignee || (assignee === "none" ? !t.assignee_id : t.assignee_id === assignee)) &&
-      (!text || t.title.toLowerCase().includes(text.toLowerCase())),
+      (!text || t.title.toLowerCase().includes(text.toLowerCase())) &&
+      sprint.keep(t),
   );
   return (
-    <>
-      <div className="row" style={{ marginBottom: 14 }} role="search" aria-label="Filtrar tarefas">
+    <div className="pv-stack">
+      <div className="pv-toolbar" role="search" aria-label="Filtrar tarefas">
         <input className="input grow" aria-label="Buscar por título" placeholder="Buscar…" value={text} onChange={(e) => setText(e.target.value)} />
         <select className="select grow" aria-label="Estado" value={status} onChange={(e) => setStatus(e.target.value)}>
           <option value="">Todos os estados</option>
@@ -293,40 +442,13 @@ function ListView({ tasks, members, onOpen }: { tasks: Task[]; members: Member[]
           <option value="none">Sem responsável</option>
           {members.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
         </select>
+        {sprint.select}
       </div>
-      {shown.length === 0 ? <Empty title={tasks.length ? "Nenhuma tarefa com esses filtros" : "Sem tarefas"}>{tasks.length ? "Limpe os filtros para ver todas." : "Use o campo acima para criar a primeira."}</Empty> : <TaskList tasks={shown} all={tasks} onOpen={onOpen} />}
-    </>
-  );
-}
-
-function Timeline({ tasks, onOpen }: { tasks: Task[]; onOpen: (id: string) => void }) {
-  const dated = tasks.filter((t) => t.due_date).sort((a, b) => a.due_date!.localeCompare(b.due_date!));
-  if (!dated.length) return <Empty title="Cronograma vazio">Defina prazos nas tarefas (ou aplique uma EAP do assistente) para ver a linha do tempo.</Empty>;
-  const ms = (d: string) => new Date(`${d}T00:00:00Z`).getTime();
-  const created = (t: Task) => t.created_at.slice(0, 10);
-  const start = Math.min(...dated.map((t) => Math.min(ms(t.due_date!), ms(created(t)))));
-  const end = Math.max(...dated.map((t) => ms(t.due_date!)));
-  const span = Math.max(end - start, 86400000);
-  const pos = (d: string) => ((ms(d) - start) / span) * 100;
-  return (
-    <div className="card">
-      <p className="coord" style={{ marginBottom: 10 }}>{fmtDate(new Date(start).toISOString().slice(0, 10))} → {fmtDate(new Date(end).toISOString().slice(0, 10))}</p>
-      <div className="timeline">
-        {dated.map((t) => {
-          const from = t.is_milestone ? pos(t.due_date!) : Math.min(pos(created(t)), pos(t.due_date!));
-          const to = pos(t.due_date!);
-          return (
-            <div className="tl-row" key={t.id}>
-              <button className="title" style={{ textAlign: "left", background: "none", border: 0, cursor: "pointer", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} onClick={() => onOpen(t.id)}>
-                {t.is_milestone ? "◆ " : ""}{t.title}
-              </button>
-              <div className="tl-track" aria-label={`${t.title}: prazo ${fmtDate(t.due_date)}, ${STATUS_LABEL[t.status]}`}>
-                <div className={`tl-bar ${t.is_milestone ? "milestone" : t.status === "done" ? "done" : t.status === "blocked" ? "blocked" : ""}`} style={{ left: `${from}%`, width: t.is_milestone ? undefined : `${Math.max(to - from, 1)}%` }} />
-              </div>
-            </div>
-          );
-        })}
+      <div className="pv-scroll">
+        {canWrite && shown.length > 1 && <p className="coord dep-tip"><Link2 size={12} aria-hidden /> Para ordenar o trabalho, arraste uma tarefa e solte sobre a que só pode começar depois dela.</p>}
+        {shown.length === 0 ? <Empty title={tasks.length ? "Nenhuma tarefa com esses filtros" : "Sem tarefas"}>{tasks.length ? "Limpe os filtros para ver todas." : "Use o campo acima para criar a primeira."}</Empty> : <TaskList tasks={shown} all={tasks} onOpen={onOpen} dependencies={{ canWrite }} />}
       </div>
+      <p className="coord pv-count">{shown.length} de {tasks.length} tarefas</p>
     </div>
   );
 }

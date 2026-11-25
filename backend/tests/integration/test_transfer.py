@@ -33,7 +33,15 @@ def origem():
         formal.save_term(ctx, pid, "tap", {"objetivos": "Modernizar"}, 0)
         formal.add_status_note(ctx, pid, "on_track", done="Kickoff")
         mae = tasks.create_task(
-            ctx, ws, pid, {"title": "Mãe", "due_date": "2026-12-01", "assignee_id": ana["id"]}
+            ctx,
+            ws,
+            pid,
+            {
+                "title": "Mãe",
+                "start_date": "2026-11-20",
+                "due_date": "2026-12-01",
+                "assignee_id": ana["id"],
+            },
         )["id"]
         filha = tasks.create_task(ctx, ws, pid, {"title": "Filha", "parent_id": mae})["id"]
         outra = tasks.create_task(ctx, ws, pid, {"title": "Outra"})["id"]
@@ -92,6 +100,7 @@ def test_ida_e_volta_cria_espaco_novo_fiel(origem):
         rows = {t["title"]: t for t in tasks.list_project_tasks(ctx, p["id"])}
         assert rows["Filha"]["parent_id"] == rows["Mãe"]["id"]
         assert rows["Mãe"]["due_date"] == "2026-12-01"
+        assert rows["Mãe"]["start_date"] == "2026-11-20"
         # Ana existe nesta instalação: volta como membro e responsável.
         assert rows["Mãe"]["assignee_id"] == origem["ana"]["id"]
         deps = tasks.get_task(ctx, rows["Outra"]["id"])["depends_on"]

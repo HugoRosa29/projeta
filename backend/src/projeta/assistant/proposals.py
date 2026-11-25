@@ -37,7 +37,7 @@ FIELD_LABEL = {
     "priority": "Prioridade",
     "assignee": "Responsável",
 }
-PRIORITY_LABEL = {"low": "Baixa", "medium": "Média", "high": "Alta"}
+PRIORITY_LABEL = {"low": "Baixa", "medium": "Média", "high": "Alta", "urgent": "Urgente"}
 STATUS_LABEL = {
     "todo": "A fazer",
     "doing": "Em andamento",

@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowUp, Check, Copy, ExternalLink, ListChecks, CalendarClock, OctagonAlert, FileText, LayoutGrid, Maximize2, Minimize2, Sparkles, Trash2, Users, X } from "lucide-react";
+import { ArrowUp, Check, CheckCircle2, Copy, CalendarPlus, MessageSquareText, ExternalLink, ListChecks, CalendarClock, OctagonAlert, FileText, LayoutGrid, Maximize2, Minimize2, Sparkles, Trash2, Users, X } from "lucide-react";
 import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import { Link } from "react-router";
 import { useProjectContext } from "../../app/projectContext";
@@ -24,7 +24,14 @@ const PROJECT_SUGGESTIONS = [
   { text: "Quem está sobrecarregado?", icon: Users },
 ];
 
-export function AssistantPanel({ onClose, expanded, onToggleExpand }: { onClose: () => void; expanded: boolean; onToggleExpand: () => void }) {
+// Modelos de atualização: preenchem o campo (não enviam), para a pessoa completar com a tarefa.
+const UPDATE_TEMPLATES = [
+  { label: "Concluir uma tarefa", text: "Conclua a tarefa ", icon: CheckCircle2 },
+  { label: "Registrar andamento", text: "Comente na tarefa ", icon: MessageSquareText },
+  { label: "Mudar um prazo", text: "Mude o prazo da tarefa ", icon: CalendarPlus },
+];
+
+export function AssistantPanel({ onClose, expanded, onToggleExpand, draft }: { onClose: () => void; expanded: boolean; onToggleExpand: () => void; draft?: { text: string; seq: number } | null }) {
   const { workspace } = useSession();
   const { project } = useProjectContext();
   const qc = useQueryClient();
@@ -57,6 +64,24 @@ export function AssistantPanel({ onClose, expanded, onToggleExpand }: { onClose:
     mutationFn: () => api.del("/assistant/conversation", { workspace_id: workspace.id }),
     onSuccess: () => (qc.invalidateQueries({ queryKey: key }), toast("Histórico do assistente excluído")),
   });
+
+  const prefill = (value: string) => {
+    setText(value);
+    const el = inputRef.current;
+    if (!el) return;
+    // Espera o React gravar o valor para posicionar o cursor no fim e ajustar a altura.
+    requestAnimationFrame(() => {
+      el.focus();
+      el.setSelectionRange(value.length, value.length);
+      grow(el);
+    });
+  };
+  const draftSeq = draft?.seq;
+  useEffect(() => {
+    if (draft) prefill(draft.text);
+    // Só reage a um pedido novo (seq), não a cada render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draftSeq]);
 
   useEffect(() => {
     if (!expanded) return;
@@ -113,11 +138,19 @@ export function AssistantPanel({ onClose, expanded, onToggleExpand }: { onClose:
             <div className="as-empty">
               <span className="as-logo" aria-hidden><Sparkles size={22} /></span>
               <h3>Como posso ajudar hoje?</h3>
-              <p>Pergunte sobre prazos, projetos, pessoas e riscos, ou descreva um objetivo e eu proponho fases, tarefas e marcos. Nada é criado ou alterado sem a sua confirmação.</p>
+              <p>Pergunte sobre prazos, projetos, pessoas e riscos, conte o que mudou numa tarefa, ou descreva um objetivo e eu proponho fases, tarefas e marcos. Nada é criado ou alterado sem a sua confirmação.</p>
               <div className="as-suggest">
                 {(project ? PROJECT_SUGGESTIONS : SUGGESTIONS).map(({ text: t, icon: Icon }) => (
                   <button key={t} type="button" className="as-card" onClick={(e) => submit(e, t)}>
                     <Icon size={18} aria-hidden /> <span>{t}</span>
+                  </button>
+                ))}
+              </div>
+              <p className="as-subtitle">Atualizar sem abrir telas</p>
+              <div className="as-suggest" role="group" aria-label="Modelos de atualização">
+                {UPDATE_TEMPLATES.map(({ label, text: t, icon: Icon }) => (
+                  <button key={label} type="button" className="as-card" onClick={() => prefill(t)}>
+                    <Icon size={18} aria-hidden /> <span>{label}</span>
                   </button>
                 ))}
               </div>

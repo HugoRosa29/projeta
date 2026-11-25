@@ -7,11 +7,17 @@ from projeta.work import projects
 NOBODY = "00000000-0000-0000-0000-000000000000"
 
 
-def make_user(name: str, email: str | None = None, allotment: str = "") -> dict:
-    """Cria a pessoa como o login pelo GIA faria (sem rede); a matrícula é o nome em maiúsculas."""
+def make_user(
+    name: str, email: str | None = None, allotment: str = "", full_name: str = ""
+) -> dict:
+    """Cria a pessoa como o login pelo GIA faria (sem rede); a matrícula é o nome em maiúsculas.
+
+    `full_name` é o nome que o GIA devolveria (padrão: o próprio `name`); serve para casar com
+    o titular da unidade em `org_unit_heads`.
+    """
     with uow(NOBODY) as ctx:
         u = auth.provision_user(
-            ctx, name, name, email or f"{name.lower()}@ex.com", allotment=allotment
+            ctx, name, full_name or name, email or f"{name.lower()}@ex.com", allotment=allotment
         )
     with uow(u["id"]) as ctx:
         u["personal_ws"] = workspaces.list_my_workspaces(ctx)[0]["id"]

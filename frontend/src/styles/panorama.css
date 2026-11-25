@@ -1,0 +1,141 @@
+/* Panorama da home em formato de quadro, enxuto: números no topo e projetos em grupos
+   recolhíveis, uma linha cada. Cor só onde pede atenção; o resto fica em tons neutros. */
+.pn-head { display: flex; align-items: center; justify-content: space-between; gap: 8px 16px; flex-wrap: wrap; margin-bottom: 10px; }
+.pn-title { display: flex; align-items: baseline; flex-wrap: wrap; gap: 2px 10px; min-width: 0; }
+.pn-title h2 { font-size: 1.25rem; }
+.pn-title p { margin: 0; font-size: 0.8125rem; }
+.pn-tools { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.pn-select { width: auto; max-width: 200px; min-height: 34px; padding: 4px 10px; font-size: 0.8125rem; }
+.pn-groupby { display: inline-flex; align-items: center; gap: 6px; font-size: 0.8125rem; color: var(--ink-60); }
+.pn-chips { margin: -2px 0 10px; gap: 8px; }
+
+/* Números do topo: uma faixa só, sem gráficos. */
+.pn-stats { list-style: none; margin: 0 0 12px; padding: 0; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--surface); overflow: hidden; }
+.pn-stat + .pn-stat { border-left: 1px solid var(--line); }
+.pn-stat > div, .pn-stat > button { width: 100%; height: 100%; display: grid; gap: 2px; padding: 10px 14px; text-align: left; border: 0; background: none; color: inherit; font: inherit; }
+.pn-stat > button { cursor: pointer; }
+.pn-stat > button:hover { background: var(--paper); }
+.pn-stat > button[aria-pressed="true"] { background: var(--azul-tint); box-shadow: inset 0 -3px 0 var(--azul); }
+.pn-stat-v { font: 700 1.5rem/1.1 var(--body); font-variant-numeric: tabular-nums; color: var(--ink); }
+.pn-stat-l { font-size: 0.75rem; color: var(--ink-60); }
+.pn-stat.pn-bad .pn-stat-v { color: var(--chart-bad); }
+.pn-stat.pn-warn .pn-stat-v { color: var(--alerta); }
+.pn-bad { color: var(--chart-bad); font-weight: 600; }
+
+/* Quadro no formato de board: cada grupo tem título na sua cor, cabeçalho próprio, faixa de
+   cor à esquerda das linhas, células cinza-claro separadas por fios e uma linha de resumo. */
+.g-blue { --g: #3f7fe0; } .g-purple { --g: #9a52d6; } .g-teal { --g: #138f8a; } .g-pink { --g: #d1478c; }
+.g-navy { --g: #2d4f8f; } .g-olive { --g: #6f7f1f; } .g-brown { --g: #9a6337; }
+.g-green { --g: #00a35c; } .g-orange { --g: #e08a1e; } .g-red { --g: #d83a52; } .g-gray { --g: #8a8f98; }
+
+.pn-board-wrap { position: relative; overflow-y: auto; overflow-x: hidden; display: grid; align-content: start; gap: 22px; padding: 2px 2px 8px 0; }
+.pn-board { width: 100%; table-layout: fixed; border-collapse: separate; border-spacing: 0; font-size: 0.875rem; }
+.pn-board th, .pn-board td { height: 38px; padding: 0 10px; text-align: center; font-weight: 400; vertical-align: middle; }
+.pn-board tbody td, .pn-board tbody th { background: var(--paper); border-right: 1px solid var(--surface); border-bottom: 1px solid var(--surface); }
+.pn-board tbody tr:hover > * { background: var(--paper-deep); }
+
+/* Cabeçalho do grupo: o título ocupa a coluna do nome; as demais trazem o nome da coluna. */
+.pn-board thead th { height: 40px; font-size: 0.8125rem; color: var(--ink-60); border-bottom: 1px solid var(--line); }
+.pn-gtitle { text-align: left !important; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-left: 0 !important; }
+.pn-gtitle button { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; min-height: 34px; padding: 0 6px 0 0; border: 0; background: none; color: var(--g); font: inherit; cursor: pointer; vertical-align: middle; }
+.pn-chev { flex: none; padding: 2px; border-radius: 50%; background: var(--g); color: #fff; transition: rotate 0.2s; }
+.pn-gtitle button[aria-expanded="false"] .pn-chev { rotate: -90deg; }
+.pn-group-l { overflow: hidden; text-overflow: ellipsis; font-size: 1.125rem; font-weight: 600; }
+.pn-count { margin-left: 6px; font-size: 0.75rem; color: var(--ink-60); vertical-align: middle; }
+
+.pn-name { text-align: left !important; box-shadow: inset 6px 0 0 var(--g); padding-left: 16px !important; }
+.pn-name a { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink); text-decoration: none; }
+.pn-name a:hover { color: var(--azul); text-decoration: underline; }
+
+/* Situação: etiqueta que ocupa a célula, como a coluna de status de um board. */
+.pn-board td.pn-label { background: var(--g); color: #fff; font-weight: 500; white-space: nowrap; }
+
+/* Larguras fixas das colunas de dado; o nome fica com o resto. */
+.pn-c-health { width: 118px; }
+.pn-c-prog { width: 150px; }
+.pn-c-tl { width: 168px; }
+.pn-c-date { width: 96px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.pn-c-num { width: 88px; font-variant-numeric: tabular-nums; }
+.pn-bad { color: var(--chart-bad); }
+.pn-board td.pn-bad { font-weight: 600; }
+
+/* Bateria de progresso. */
+.pn-bat { display: flex; align-items: center; gap: 8px; }
+.pn-bat-track { flex: 1; height: 22px; border-radius: 3px; background: color-mix(in srgb, var(--ink-60) 22%, var(--surface)); overflow: hidden; }
+.pn-bat-fill { display: block; height: 100%; background: #00a35c; }
+.pn-bat-v { min-width: 2.6em; text-align: right; font-size: 0.8125rem; font-variant-numeric: tabular-nums; color: var(--ink-60); }
+
+/* Pílula da timeline: cor do grupo até hoje, o resto mais claro. */
+.pn-pill { display: block; padding: 4px 10px; border-radius: 999px; color: #fff; font-size: 0.8125rem; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  background: linear-gradient(90deg, var(--g) var(--done, 0%), color-mix(in srgb, var(--g) 55%, #6b7078) var(--done, 0%)); }
+.pn-pill-none { background: none; color: var(--ink-60); font-weight: 400; }
+
+/* Linha de resumo do grupo. */
+.pn-board tfoot td { height: 44px; background: none; }
+.pn-board tfoot td:not(.pn-foot-pad) { border-bottom: 1px solid var(--line); }
+.pn-board tfoot small { display: block; margin-top: -2px; font-size: 0.6875rem; font-weight: 400; color: var(--ink-60); }
+.pn-mix { display: flex; gap: 1px; height: 22px; border-radius: 3px; overflow: hidden; }
+.pn-mix > span { min-width: 4px; background: var(--g); }
+.pn-empty { padding: 16px 0; }
+
+/* As colunas medem o quadro: o assistente aberto estreita a home. */
+.pn { container: pn / inline-size; }
+@container pn (max-width: 820px) { .pn-c-num { display: none; } }
+@container pn (max-width: 700px) { .pn-c-date { display: none; } }
+@container pn (max-width: 560px) { .pn-stats { grid-template-columns: repeat(3, minmax(0, 1fr)); } .pn-stat:nth-child(4) { border-left: 0; } .pn-stat:nth-child(n + 4) { border-top: 1px solid var(--line); } }
+@container pn (max-width: 520px) { .pn-c-health, .pn-c-tl { display: none; } .pn-tools { width: 100%; } }
+@media (forced-colors: active) { .pn-bat-fill, .pn-pill, .pn-label, .pn-mix > span { forced-color-adjust: none; border: 1px solid CanvasText; } }
+
+/* Home em painel. No desktop a página não rola: o quadro e a coluna lateral rolam cada um
+   por dentro, só na vertical. Em telas baixas ou estreitas volta ao fluxo normal. */
+.dash { display: grid; gap: 14px; }
+/* Saudação: faixa curta no mesmo degradê do Hero, para não roubar altura do quadro. */
+.dash-hello { position: relative; isolation: isolate; overflow: clip; display: flex; align-items: center; gap: 14px; padding: 12px 20px; border-radius: 18px; color: #fff;
+  background: radial-gradient(420px 160px at 85% 0%, rgba(201, 161, 13, 0.3), transparent 70%), linear-gradient(120deg, var(--hero-a), var(--hero-b) 58%, color-mix(in srgb, var(--hero-c) 65%, var(--hero-b)));
+  box-shadow: var(--shadow-1); }
+.dash-hello::before { content: ""; position: absolute; inset: 0; z-index: -1; opacity: 0.5; background-image: linear-gradient(rgba(255, 255, 255, 0.07) 1px, transparent 1px), linear-gradient(90deg, rgba(255, 255, 255, 0.07) 1px, transparent 1px); background-size: 28px 28px; -webkit-mask-image: linear-gradient(90deg, transparent 30%, #000); mask-image: linear-gradient(90deg, transparent 30%, #000); }
+.dash-avatar { flex: none; display: grid; place-items: center; width: 44px; height: 44px; border-radius: 50%; background: rgba(255, 255, 255, 0.14); box-shadow: inset 0 0 0 2px #f0d36a; font: 700 0.9375rem/1 var(--display); letter-spacing: 0.02em; }
+.dash-hello-text { min-width: 0; flex: 1; }
+.dash-hello h1 { margin: 0; font-size: 1.375rem; line-height: 1.2; color: #fff; }
+.dash-date { margin: 2px 0 0; font-size: 0.8125rem; color: rgba(255, 255, 255, 0.82); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dash-date::first-letter { text-transform: uppercase; }
+.dash-mode { flex: none; padding: 4px 12px; border-radius: 999px; background: rgba(240, 211, 106, 0.18); box-shadow: inset 0 0 0 1px rgba(240, 211, 106, 0.55); color: #f6e3a1; font: 600 0.75rem/1.4 var(--mono); letter-spacing: 0.06em; text-transform: uppercase; }
+@media (max-width: 520px) { .dash-mode { display: none; } }
+.dash-main, .dash-side { min-width: 0; }
+.dash .ov { margin-bottom: 0; }
+.dash-side { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; align-content: start; }
+.dash-side > * { min-width: 0; margin: 0; }
+.dash-side > .card { padding: 14px 16px; box-shadow: none; }
+.dash-side .card-head { flex-wrap: wrap; }
+.dash-side .okr-pulse-grid { grid-template-columns: minmax(0, 1fr); gap: 10px; }
+.dash-side .okr-pulse.empty-pulse p { font-size: 0.875rem; }
+.dash-placeholder { display: grid; gap: 10px; justify-items: start; }
+.dash-placeholder p { margin: 0; }
+.dash-tasks .card-head { margin-bottom: 10px; }
+.dash-tasks .quick-add { margin: 0; }
+.dash-tasks .quick-add .input { min-width: 0; }
+.dash-tasks .task-list { gap: 6px; }
+.dash-tasks .task-row { padding: 8px 10px; }
+.dash-tasks .empty { padding: 18px 12px; }
+
+.dash-tabs { display: flex; flex-wrap: wrap; gap: 2px 4px; margin: 10px 0 8px; border-bottom: 1px solid var(--line); }
+.dash-tabs button { display: inline-flex; align-items: center; gap: 4px; min-height: 34px; padding: 0 4px; border: 0; border-bottom: 2px solid transparent; background: none; color: var(--ink-60); font: inherit; font-size: 0.75rem; font-weight: 600; white-space: nowrap; cursor: pointer; }
+.dash-tabs button:hover { color: var(--ink); }
+.dash-tabs button[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--verde); }
+.dash-tab-n { font-size: 0.75rem; font-weight: 500; color: var(--ink-60); font-variant-numeric: tabular-nums; }
+.dash-tabs .is-alert .dash-tab-n { color: var(--chart-bad); font-weight: 700; }
+
+/* Sem projetos o panorama não aparece: o trabalho da pessoa ocupa a largura. */
+.dash-main:empty { display: none; }
+
+@media (min-width: 1100px) and (min-height: 640px) {
+  .main:has(> .dash) { max-width: 1680px; height: 100dvh; display: flex; flex-direction: column; padding-bottom: 16px; }
+  .dash { flex: 1; min-height: 0; grid-template-columns: minmax(0, 1fr) clamp(300px, 24vw, 360px); grid-template-rows: auto minmax(0, 1fr); }
+  .dash:has(> .dash-main:empty) { grid-template-columns: minmax(0, 720px); }
+  .dash-hello { grid-column: 1 / -1; }
+  .dash-main { display: flex; flex-direction: column; gap: 12px; min-height: 0; overflow: hidden auto; }
+  .dash-main .ov { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+  .dash-main .pn-board-wrap { flex: 1; min-height: 200px; }
+  .dash-main, .dash-side { position: relative; }
+  .dash-side { min-height: 0; overflow: hidden auto; }
+}
