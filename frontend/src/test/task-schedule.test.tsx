@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Task } from "../domain/types";
 import { dependencyCandidates, scheduleConflicts } from "../domain/work";
 import { Timeline } from "../features/projects/Timeline";
-import { DueBadge, TaskList } from "../features/tasks/TaskParts";
+import { DueBadge, TaskDialog, TaskList } from "../features/tasks/TaskParts";
 import { api } from "../services/api";
 
 const base: Omit<Task, "id" | "title" | "status"> = { workspace_id: "w1", project_id: "p1", owner_id: null, description: "", priority: "medium", assignee_id: null, assignee_name: null, project_name: "CNPJ", due_date: null, estimate_minutes: null, progress: 0, phase: null, is_milestone: false, labels: [], version: 2, created_at: "", updated_at: "", parent_id: null, parent_title: null };
@@ -142,5 +142,119 @@ describe("cronograma com dependências", () => {
   it("quem só lê não vê as alças de ligação", () => {
     wrap(<Timeline tasks={[a, b]} canWrite={false} onOpen={() => {}} />);
     expect(screen.queryByLabelText(/Ligar “/)).toBeNull();
+  });
+});
+
+describe("dependências em Minhas tarefas", () => {
+  it("mostra o que a tarefa aguarda, com prazo, e abre a anterior ao clicar", async () => {
+    const onOpen = vi.fn();
+    const mine = task("b", { title: "Implantar", waiting_on: [{ id: "a", title: "Contratar", status: "todo", due_date: "2026-12-05" }] });
+    // A anterior é de outra pessoa: não está na lista, o título vem do servidor.
+    wrap(<TaskList tasks={[mine]} onOpen={onOpen} dependencies={{ canWrite: false }} />);
+    await userEvent.setup().click(screen.getByRole("button", { name: /Aguarda 1 tarefa\(s\): Contratar/ }));
+    expect(onOpen).toHaveBeenCalledWith("a");
+    expect(screen.getByText(/05\/12\/26/)).toBeInTheDocument();
+    expect(screen.queryByLabelText("Dependências de Implantar")).toBeNull();
+  });
+
+  it("avisa quantas tarefas esperam por esta", () => {
+    wrap(<TaskList tasks={[task("a", { title: "Contratar", blocking_count: 2 })]} onOpen={() => {}} dependencies={{ canWrite: false }} />);
+    expect(screen.getByText("Libera 2 tarefas")).toBeInTheDocument();
+  });
+});
+
+describe("início automático na ficha", () => {
+  it("trava o início quando há dependência com prazo e explica de onde ele vem", async () => {
+    const b = task("b", { title: "Homologar", start_date: "2026-12-06", due_date: "2026-12-10", depends_on_ids: ["a"] });
+    vi.spyOn(api, "get").mockImplementation(async (path: string) =>
+      (path.endsWith("/comments")
+        ? { comments: [] }
+        : path.startsWith("/projects/")
+          ? { tasks: [b] }
+          : { task: b, can_write: true, can_comment: true, depends_on: [{ id: "a", title: "Levantar requisitos", status: "todo", due_date: "2026-12-05" }], blocks: [], subtasks: [] }) as never,
+    );
+    wrap(<TaskDialog taskId="b" onClose={() => {}} />);
+    expect(await screen.findByText(/Início automático/)).toHaveTextContent("Levantar requisitos (05/12/26)");
+    expect(screen.getByLabelText("Início")).toBeDisabled();
+    expect(screen.getByLabelText("Prazo")).toBeEnabled();
+  });
+});
+
+describe("cronograma compacto", () => {
+  const a = task("a", { title: "Levantar requisitos", phase: "Planejamento", start_date: "2026-12-01", due_date: "2026-12-05" });
+  const b = task("b", { title: "Homologar", phase: "Execução", start_date: "2026-12-08", due_date: "2026-12-12", depends_on_ids: ["a"] });
+
+  it("recolhe uma fase para mostrar só a barra-resumo, e expande tudo de volta", async () => {
+    wrap(<Timeline tasks={[a, b]} canWrite onOpen={() => {}} />);
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "Planejamento" }));
+    expect(screen.getByRole("button", { name: "Planejamento" })).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByRole("button", { name: "Levantar requisitos" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Homologar" })).toBeInTheDocument();
+    // Com alguma fase recolhida, o botão geral expande todas; depois recolhe todas.
+    await user.click(screen.getByRole("button", { name: /Expandir fases/ }));
+    expect(screen.getByRole("button", { name: "Levantar requisitos" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /Recolher fases/ }));
+    expect(screen.queryByRole("button", { name: "Homologar" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Levantar requisitos" })).toBeNull();
+  });
+
+  it("abre em Ajustar e entra e sai da tela cheia (Esc sai)", async () => {
+    wrap(<Timeline tasks={[a, b]} canWrite onOpen={() => {}} />);
+    const user = userEvent.setup();
+    expect(screen.getByRole("button", { name: "Ajustar" })).toHaveAttribute("aria-pressed", "true");
+    await user.click(screen.getByRole("button", { name: "Cronograma em tela cheia" }));
+    expect(screen.getByRole("button", { name: "Sair da tela cheia" })).toHaveAttribute("aria-pressed", "true");
+    await user.keyboard("{Escape}");
+    expect(screen.getByRole("button", { name: "Cronograma em tela cheia" })).toBeInTheDocument();
+  });
+});
+
+describe("remover ligação pelo cronograma", () => {
+  const a = task("a", { title: "Emitir 2ª via de boleto", start_date: "2026-12-01", due_date: "2026-12-05" });
+  const b = task("b", { title: "Painel administrativo", start_date: "2026-12-06", due_date: "2026-12-10", depends_on_ids: ["a"] });
+
+  it("clicar na seta abre o balão; Cancelar não remove, confirmar remove", async () => {
+    const del = vi.spyOn(api, "del").mockResolvedValue(undefined);
+    const { container } = wrap(<Timeline tasks={[a, b]} canWrite onOpen={() => {}} />);
+    const user = userEvent.setup();
+    fireEvent.click(container.querySelector(".g-edge-hit")!);
+    const pop = screen.getByRole("dialog", { name: "Remover esta ligação?" });
+    expect(pop).toHaveTextContent("“Painel administrativo” deixa de esperar por “Emitir 2ª via de boleto”");
+    expect(pop).toHaveTextContent("o início volta a ser editável");
+    await user.click(screen.getByRole("button", { name: "Cancelar" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(del).not.toHaveBeenCalled();
+    fireEvent.click(container.querySelector(".g-edge-hit")!);
+    await user.click(screen.getByRole("button", { name: "Remover ligação" }));
+    await vi.waitFor(() => expect(del).toHaveBeenCalledWith("/tasks/b/dependencies/a"));
+  });
+
+  it("Esc fecha o balão sem remover", async () => {
+    const del = vi.spyOn(api, "del").mockResolvedValue(undefined);
+    const { container } = wrap(<Timeline tasks={[a, b]} canWrite onOpen={() => {}} />);
+    fireEvent.click(container.querySelector(".g-edge-hit")!);
+    await userEvent.setup().keyboard("{Escape}");
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(del).not.toHaveBeenCalled();
+  });
+});
+
+describe("zoom sem rolagem desnecessária", () => {
+  // Projeto curto (~1 mês): cabe inteiro na janela de Mês e de Trimestre.
+  const a = task("a", { title: "Levantar requisitos", start_date: "2026-12-01", due_date: "2026-12-10" });
+  const b = task("b", { title: "Homologar", start_date: "2026-12-11", due_date: "2026-12-24", depends_on_ids: ["a"] });
+
+  it("só oferece navegar no tempo quando a janela não comporta o projeto", async () => {
+    const width = vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(1260);
+    wrap(<Timeline tasks={[a, b]} canWrite onOpen={() => {}} />);
+    const user = userEvent.setup();
+    for (const z of ["Ajustar", "Trimestre", "Mês"]) {
+      await user.click(screen.getByRole("button", { name: z }));
+      expect(screen.queryByRole("group", { name: "Navegar no tempo" })).toBeNull();
+    }
+    await user.click(screen.getByRole("button", { name: "Semana" }));
+    expect(screen.getByRole("group", { name: "Navegar no tempo" })).toBeInTheDocument();
+    width.mockRestore();
   });
 });

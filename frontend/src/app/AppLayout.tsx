@@ -1,5 +1,5 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { CalendarDays, CheckSquare, FolderKanban, House, LayoutDashboard, MessageCircle, Settings, Target } from "lucide-react";
+import { CalendarDays, CheckSquare, FolderKanban, House, LayoutDashboard, MessageCircle, Settings, Target, UserRound } from "lucide-react";
 import { useCallback, useMemo, useState } from "react";
 import { NavLink, Outlet } from "react-router";
 import { Logo } from "../components/ui";
@@ -57,7 +57,7 @@ export function AppLayout() {
         </nav>
         <div className="nav-art"><Skyline onLight chips={false} /></div>
         <div className="nav-foot">
-          <span className="coord">{user.name}</span>
+          <NavLink to="/perfil" className="coord nav-profile" title="Ver seu perfil"><UserRound size={16} aria-hidden /> {user.name}</NavLink>
           <button className="btn btn-ghost" onClick={logout}>Sair</button>
         </div>
       </aside>
@@ -71,6 +71,7 @@ export function AppLayout() {
             </select>
             <span className="spacer" />
             <ThemeToggle />
+            <NavLink to="/perfil" className="btn btn-ghost btn-sm topbar-profile" aria-label="Seu perfil"><UserRound size={18} aria-hidden /></NavLink>
             <button className="btn btn-primary btn-sm" aria-expanded={assistantOpen} aria-controls="assistant" onClick={() => setAssistantOpen((v) => !v)}>
               <MessageCircle size={18} aria-hidden /> Assistente
             </button>

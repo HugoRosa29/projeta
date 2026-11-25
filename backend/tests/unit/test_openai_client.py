@@ -86,3 +86,57 @@ def test_falha_do_provedor_vira_erro_recuperavel(err):
     with pytest.raises(UpstreamError) as e:
         llm.run("s", [HistoryMessage("user", "oi")], [], lambda n, a: {}, 2)
     assert "manual" in e.value.message
+
+
+def test_parametros_de_latencia_vao_ao_provedor():
+    llm, responses = _client([_resp([_call("x", "{}")]), _resp([], "ok")])
+    llm.run("s", [HistoryMessage("user", "oi")], [], lambda n, a: {"a": [1, 2]}, 2)
+    first, second = responses.calls
+    assert first["reasoning"] == {"effort": "low"} and first["text"] == {"verbosity": "low"}
+    assert first["prompt_cache_key"] == "projeta-assistant"
+    assert second["input"][-1]["output"] == '{"a":[1,2]}'  # JSON compacto: menos tokens
+
+
+def test_sem_ajuste_de_latencia_nao_envia_parametros():
+    fake = NS(responses=FakeResponses([_resp([], "ok")]))
+    llm = OpenAIResponsesLLM("k", "m", client=fake, reasoning_effort=None, text_verbosity=None)
+    llm.run("s", [HistoryMessage("user", "oi")], [], lambda n, a: {}, 2)
+    assert "reasoning" not in fake.responses.calls[0] and "text" not in fake.responses.calls[0]
+
+
+def _ev(kind, **kw):
+    return NS(type=kind, **kw)
+
+
+def test_streaming_repassa_trechos_e_descarta_preambulo_de_ferramenta():
+    tool_round = _resp([_call("my_day", "{}")])
+    final = _resp([], "Tudo certo.")
+    llm, responses = _client(
+        [
+            [
+                _ev("response.output_text.delta", delta="Vou ver"),
+                _ev("response.completed", response=tool_round),
+            ],
+            [
+                _ev("response.output_text.delta", delta="Tudo "),
+                _ev("response.output_text.delta", delta="certo."),
+                _ev("response.completed", response=final),
+            ],
+        ]
+    )
+    events = []
+    r = llm.run("s", [HistoryMessage("user", "oi")], [], lambda n, a: {}, 3, events.append)
+    assert r.text == "Tudo certo." and r.tool_rounds == 1
+    assert events == [
+        {"type": "delta", "text": "Vou ver"},
+        {"type": "reset"},
+        {"type": "delta", "text": "Tudo "},
+        {"type": "delta", "text": "certo."},
+    ]
+    assert all(c["stream"] is True for c in responses.calls)
+
+
+def test_streaming_com_falha_do_provedor_vira_erro_recuperavel():
+    llm, _ = _client([[_ev("response.failed", response=None)]])
+    with pytest.raises(UpstreamError):
+        llm.run("s", [HistoryMessage("user", "oi")], [], lambda n, a: {}, 2, lambda e: None)

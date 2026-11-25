@@ -23,7 +23,12 @@ class Settings(BaseSettings):
 
     assistant_provider: Literal["openai", "mock"] = "openai"
     openai_api_key: str = ""
-    openai_model: str = "gpt-5-mini"
+    openai_model: str = "gpt-5.5"
+    # Latência: o raciocínio é a maior parte do tempo de resposta. "low" mantém o uso de
+    # ferramentas confiável; "medium" é o padrão do provedor. O mais rápido depende da família:
+    # "minimal" na gpt-5 / gpt-5-mini, "none" a partir da gpt-5.1.
+    openai_reasoning_effort: Literal["none", "minimal", "low", "medium", "high"] = "low"
+    openai_text_verbosity: Literal["low", "medium", "high"] = "low"
     assistant_max_tool_rounds: int = 8
     assistant_max_input_chars: int = 2000
     assistant_rate_limit_per_hour: int = 60

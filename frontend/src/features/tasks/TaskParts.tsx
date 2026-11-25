@@ -24,26 +24,65 @@ import { useCreateTask, useDeleteTask, useDependency, useInvalidateWork, useUpda
 const normTag = (label: string) => label.trim().toLocaleUpperCase("pt-BR");
 
 /** Criar tarefa informando só o título; prazo e prioridade são opcionais. */
-export function QuickAdd({ workspaceId, projectId, placeholder }: { workspaceId: string; projectId?: string; placeholder?: string }) {
+type NewKind = "task" | "milestone" | "subtask";
+const KIND_LABEL: Record<NewKind, string> = { task: "Tarefa", milestone: "Marco", subtask: "Subtarefa" };
+const KIND_PLACEHOLDER: Record<NewKind, string> = { task: "Nova tarefa…", milestone: "Nome do marco…", subtask: "Nova subtarefa…" };
+
+/** Criação rápida. Em projeto (`tasks` informado), escolhe o tipo: marco pede a data (sem ela não
+ * aparece no cronograma nem na agenda) e subtarefa pede a tarefa-mãe (só tarefas principais,
+ * porque o servidor aceita um nível só). */
+export function QuickAdd({ workspaceId, projectId, placeholder, tasks }: { workspaceId: string; projectId?: string; placeholder?: string; tasks?: Task[] }) {
   const [title, setTitle] = useState("");
+  const [kind, setKind] = useState<NewKind>("task");
+  const [date, setDate] = useState("");
+  const [parent, setParent] = useState("");
   const create = useCreateTask();
   const toast = useToast();
+  const kinds = !!projectId && !!tasks;
+  const parents = (tasks ?? []).filter((t) => !t.parent_id && !t.is_milestone);
+  const ready = !!title.trim() && (kind !== "milestone" || !!date) && (kind !== "subtask" || !!parent);
   const submit = (e: FormEvent) => {
     e.preventDefault();
     const t = title.trim();
-    if (!t) return;
+    if (!t || !ready) return;
+    const extra = kind === "milestone" ? { is_milestone: true, due_date: date } : kind === "subtask" ? { parent_id: parent } : {};
     create.mutate(
-      { workspace_id: workspaceId, project_id: projectId ?? null, title: t },
-      { onSuccess: () => (setTitle(""), toast("Tarefa criada")), onError: (er) => toast((er as Error).message) },
+      { workspace_id: workspaceId, project_id: projectId ?? null, title: t, ...extra },
+      { onSuccess: () => (setTitle(""), setDate(""), toast(`${KIND_LABEL[kind]} criad${kind === "milestone" ? "o" : "a"}`)), onError: (er) => toast((er as Error).message) },
     );
   };
   return (
-    <form className="quick-add" onSubmit={submit}>
+    <form className={`quick-add${kinds ? " quick-add-kinds" : ""}`} onSubmit={submit}>
+      {kinds && (
+        <>
+          <label className="sr-only" htmlFor="quick-kind">Tipo do item</label>
+          <select id="quick-kind" className="input quick-kind" value={kind} onChange={(e) => setKind(e.target.value as NewKind)}>
+            {(Object.keys(KIND_LABEL) as NewKind[]).map((k) => (
+              <option key={k} value={k} disabled={k === "subtask" && !parents.length}>{KIND_LABEL[k]}</option>
+            ))}
+          </select>
+        </>
+      )}
       <label className="sr-only" htmlFor="quick-title">
-        Título da nova tarefa
+        {kinds ? `Título: ${KIND_LABEL[kind].toLowerCase()}` : "Título da nova tarefa"}
       </label>
-      <input id="quick-title" className="input" value={title} onChange={(e) => setTitle(e.target.value)} placeholder={placeholder ?? "Nova tarefa… (Enter para criar)"} maxLength={200} />
-      <button className="btn btn-primary" disabled={create.isPending || !title.trim()}>
+      <input id="quick-title" className="input" value={title} onChange={(e) => setTitle(e.target.value)} placeholder={kinds ? KIND_PLACEHOLDER[kind] : placeholder ?? "Nova tarefa… (Enter para criar)"} maxLength={200} />
+      {kinds && kind === "milestone" && (
+        <>
+          <label className="sr-only" htmlFor="quick-date">Data do marco</label>
+          <input id="quick-date" className="input quick-extra" type="date" value={date} onChange={(e) => setDate(e.target.value)} required />
+        </>
+      )}
+      {kinds && kind === "subtask" && (
+        <>
+          <label className="sr-only" htmlFor="quick-parent">Tarefa-mãe</label>
+          <select id="quick-parent" className="input quick-extra" value={parent} onChange={(e) => setParent(e.target.value)} required>
+            <option value="">Tarefa-mãe…</option>
+            {parents.map((t) => <option key={t.id} value={t.id}>{t.title}</option>)}
+          </select>
+        </>
+      )}
+      <button className="btn btn-primary" disabled={create.isPending || !ready}>
         <Plus size={18} aria-hidden /> Criar
       </button>
     </form>
@@ -60,13 +99,15 @@ export function DueBadge({ task, today }: { task: Task; today?: string }) {
 
 /** Dependências na linha da lista: quanto falta para a tarefa poder andar e, para quem edita, um
  * seletor nativo para ligar ou desligar outra tarefa do projeto sem abrir a ficha. */
-export function DependencyControl({ task, all, canWrite }: { task: Task; all: Task[]; canWrite: boolean }) {
+export function DependencyControl({ task, all, canWrite, onOpen }: { task: Task; all: Task[]; canWrite: boolean; onOpen?: (id: string) => void }) {
   const { add, remove } = useDependency();
   const toast = useToast();
   if (!task.project_id) return null;
   const byId = new Map(all.map((t) => [t.id, t]));
   const deps = (task.depends_on_ids ?? []).map((id) => byId.get(id)).filter((d): d is Task => !!d);
-  const pending = deps.filter((d) => d.status !== "done");
+  // O servidor já manda o que falta (com título), mesmo quando a anterior não está nesta lista.
+  const pending = task.waiting_on ?? deps.filter((d) => d.status !== "done");
+  const blocking = task.blocking_count ?? 0;
   const conflicts = scheduleConflicts(task, all);
   const candidates = canWrite ? dependencyCandidates(task, all) : [];
   const busy = add.isPending || remove.isPending;
@@ -74,8 +115,21 @@ export function DependencyControl({ task, all, canWrite }: { task: Task; all: Ta
   return (
     <>
       {pending.length > 0 && (
-        <span className={`badge ${conflicts.length ? "alerta" : "info"}`} title={`Aguarda: ${names}`} aria-label={`Aguarda ${pending.length} tarefa(s): ${names}${conflicts.length ? ". Começa antes de uma delas terminar" : ""}`}>
+        <button
+          type="button"
+          className={`badge badge-btn ${conflicts.length ? "alerta" : "info"}`}
+          title={`Aguarda: ${pending.map((d) => `${d.title}${d.due_date ? ` (prazo ${fmtDate(d.due_date)})` : ""}`).join(", ")}`}
+          aria-label={`Aguarda ${pending.length} tarefa(s): ${names}${conflicts.length ? ". Começa antes de uma delas terminar" : ""}. Abrir ${pending[0].title}`}
+          disabled={!onOpen}
+          onClick={() => onOpen?.(pending[0].id)}
+        >
           {conflicts.length ? <TriangleAlert size={12} aria-hidden /> : <Link2 size={12} aria-hidden />} Aguarda {pending.length === 1 ? pending[0].title : `${pending.length} tarefas`}
+          {pending.length === 1 && pending[0].due_date ? ` · ${fmtDate(pending[0].due_date)}` : ""}
+        </button>
+      )}
+      {blocking > 0 && (
+        <span className="badge warn" title="Tarefas que só começam quando esta terminar">
+          Libera {blocking === 1 ? "1 tarefa" : `${blocking} tarefas`}
         </span>
       )}
       {canWrite && (candidates.length > 0 || deps.length > 0) && (
@@ -186,7 +240,7 @@ export function TaskRow({ task, today, onOpen, subtasks, nested, quick, deps }: 
           {task.status !== "todo" && <span className="badge info">{STATUS_LABEL[task.status]}</span>}
           {task.sprint_status === "active" && <span className="badge ok">{task.sprint_name}</span>}
           {task.assignee_name && <span>{task.assignee_name}</span>}
-          {deps && <DependencyControl task={task} all={deps.all} canWrite={deps.canWrite} />}
+          {deps && <DependencyControl task={task} all={deps.all} canWrite={deps.canWrite} onOpen={onOpen} />}
           {over && dropOk && <span className="dep-drop-hint">Solte: começa depois de “{dragged.title}”</span>}
         </div>
         {quick && !done && <QuickActions task={task} today={today} />}
@@ -360,6 +414,8 @@ export function TaskDialog({ taskId, members, onClose }: { taskId: string; membe
     if (confirm(msg)) del.mutate(id, { onSuccess: () => (toast("Tarefa excluída"), onClose()) });
   };
 
+  // Com dependência datada, o início é calculado pelo servidor (dia seguinte ao prazo da anterior).
+  const linkedBy = (d?.depends_on ?? []).filter((x) => x.due_date).sort((a, b) => b.due_date!.localeCompare(a.due_date!))[0];
   const startVal = val("start_date");
   const dueVal = val("due_date");
   const datesInverted = !!startVal && !!dueVal && startVal > dueVal;
@@ -400,13 +456,18 @@ export function TaskDialog({ taskId, members, onClose }: { taskId: string; membe
             </div>
             <div className="field grow">
               <label htmlFor="t-start">Início</label>
-              <input id="t-start" type="date" className="input" value={val("start_date") ?? ""} max={val("due_date") ?? undefined} disabled={!d.can_write} aria-describedby={datesInverted ? "t-dates-error" : undefined} onChange={(e) => setDraft({ ...draft, start_date: e.target.value || null })} />
+              <input id="t-start" type="date" className="input" value={val("start_date") ?? ""} max={val("due_date") ?? undefined} disabled={!d.can_write || !!linkedBy} aria-describedby={[linkedBy && "t-start-linked", datesInverted && "t-dates-error"].filter(Boolean).join(" ") || undefined} onChange={(e) => setDraft({ ...draft, start_date: e.target.value || null })} />
             </div>
             <div className="field grow">
               <label htmlFor="t-due">Prazo</label>
               <input id="t-due" type="date" className="input" value={val("due_date") ?? ""} min={val("start_date") ?? undefined} disabled={!d.can_write} aria-describedby={datesInverted ? "t-dates-error" : undefined} onChange={(e) => setDraft({ ...draft, due_date: e.target.value || null })} />
             </div>
           </div>
+          {linkedBy && (
+            <p id="t-start-linked" className="muted start-linked">
+              <Link2 size={13} aria-hidden /> Início automático: no dia seguinte ao prazo de <strong>{linkedBy.title}</strong> ({fmtDate(linkedBy.due_date)}). Se esse prazo mudar, esta tarefa anda junto e mantém a duração.
+            </p>
+          )}
           {datesInverted && <p id="t-dates-error" className="form-error" role="alert">O início fica depois do prazo. Antecipe o início ou adie o prazo.</p>}
           {t.project_id && members && (
             <div className="field">

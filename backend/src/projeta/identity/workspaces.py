@@ -258,3 +258,40 @@ def update_my_prefs(
 def update_my_timezone(ctx: Ctx, timezone: str) -> None:
     _check_tz(timezone)
     ctx.run("UPDATE users SET timezone=%s WHERE id=%s", (timezone, ctx.user_id))
+
+
+def my_profile(ctx: Ctx) -> dict:
+    """Dados da própria pessoa da sessão: identidade, lotação, unidade e espaços.
+
+    Só lê a linha de `ctx.user_id`; não há como pedir o perfil de outra pessoa. O código
+    interno do GIA e o hash da senha ficam de fora.
+    """
+    user = ctx.one(
+        "SELECT u.id, u.name, u.email, u.matricula, u.allotment, u.timezone, u.created_at, "
+        "u.matricula IS NOT NULL AS via_gia, ou.sigla AS unit, ou.label AS unit_label "
+        "FROM users u LEFT JOIN org_units ou ON ou.sigla = projeta_unit_for_allotment(u.allotment) "
+        "WHERE u.id = %s",
+        (ctx.user_id,),
+    )
+    assert user
+    origin = "gia" if user.pop("via_gia") else "local"
+    heads_of = ctx.all(
+        "SELECT ou.sigla, ou.label FROM org_unit_heads h JOIN org_units ou ON ou.sigla = h.sigla "
+        "WHERE %s::text IS NOT NULL AND projeta_name_key(h.name) = projeta_name_key(%s) "
+        "ORDER BY ou.sigla",
+        (user["matricula"], user["name"]),
+    )
+    spaces = ctx.all(
+        "SELECT w.id, w.name, w.kind, w.org_unit, wm.role FROM workspaces w "
+        "JOIN workspace_members wm ON wm.workspace_id = w.id AND wm.user_id = %s "
+        "ORDER BY (w.kind = 'personal') DESC, w.org_unit IS NULL, w.name",
+        (ctx.user_id,),
+    )
+    unit = {"sigla": user.pop("unit"), "label": user.pop("unit_label")}
+    return {
+        **user,
+        "origin": origin,
+        "unit": unit if unit["sigla"] else None,
+        "heads_of": heads_of,
+        "workspaces": spaces,
+    }

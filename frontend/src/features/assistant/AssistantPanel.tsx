@@ -8,7 +8,7 @@ import { Markdown } from "../../components/Markdown";
 import { ErrorBox, useToast } from "../../components/ui";
 import { api } from "../../services/api";
 import { ProposalCard } from "./ProposalCard";
-import type { ChatMessage, Conversation } from "./types";
+import type { ChatMessage, Conversation, StreamEvent } from "./types";
 
 // Com um projeto aberto, as sugestões falam dele; fora, do panorama da pessoa e do espaço.
 const SUGGESTIONS = [
@@ -39,6 +39,9 @@ export function AssistantPanel({ onClose, expanded, onToggleExpand, draft }: { o
   const [text, setText] = useState("");
   const [pendingText, setPendingText] = useState<string | null>(null);
   const [lastFailed, setLastFailed] = useState<string | null>(null);
+  // Resposta chegando: texto parcial e a ferramenta em uso (antes do primeiro trecho).
+  const [streamText, setStreamText] = useState("");
+  const [toolLabel, setToolLabel] = useState<string | null>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const key = ["assistant", workspace.id];
@@ -47,12 +50,19 @@ export function AssistantPanel({ onClose, expanded, onToggleExpand, draft }: { o
   const messages = conv.data?.messages ?? [];
 
   const send = useMutation({
-    mutationFn: (message: string) => api.post("/assistant/chat", { workspace_id: workspace.id, project_id: project?.id ?? null, message }),
-    onMutate: (m) => (setPendingText(m), setLastFailed(null)),
+    mutationFn: (message: string) =>
+      api.stream<StreamEvent>("/assistant/chat/stream", { workspace_id: workspace.id, project_id: project?.id ?? null, message }, (ev) => {
+        if (ev.type === "delta") setStreamText((t) => t + ev.text);
+        else if (ev.type === "reset") setStreamText("");
+        else if (ev.type === "tool") setToolLabel(ev.label);
+      }),
+    onMutate: (m) => (setPendingText(m), setLastFailed(null), setStreamText(""), setToolLabel(null)),
     onError: (_e, m) => setLastFailed(m),
     onSettled: async () => {
       await qc.invalidateQueries({ queryKey: key });
       setPendingText(null);
+      setStreamText("");
+      setToolLabel(null);
     },
   });
   const resolve = useMutation({
@@ -92,7 +102,7 @@ export function AssistantPanel({ onClose, expanded, onToggleExpand, draft }: { o
 
   useEffect(() => {
     bodyRef.current?.scrollTo({ top: bodyRef.current.scrollHeight });
-  }, [messages.length, pendingText, send.isError]);
+  }, [messages.length, pendingText, send.isError, streamText, toolLabel]);
 
   const submit = (e: FormEvent, override?: string) => {
     e.preventDefault();
@@ -162,9 +172,18 @@ export function AssistantPanel({ onClose, expanded, onToggleExpand, draft }: { o
           {pendingText && (
             <>
               <div className="as-row user"><div className="as-bubble">{pendingText}</div></div>
-              <div className="as-row assistant" role="status" aria-label="O assistente está respondendo">
+              <div className="as-row assistant" role="status" aria-label="O assistente está respondendo" aria-busy="true">
                 <span className="as-avatar" aria-hidden><Sparkles size={16} /></span>
-                <div className="as-content"><span className="as-dots" aria-hidden><i /><i /><i /></span></div>
+                <div className="as-content">
+                  {streamText ? (
+                    <Markdown text={streamText} />
+                  ) : (
+                    <>
+                      <span className="as-dots" aria-hidden><i /><i /><i /></span>
+                      {toolLabel && <span className="as-working">{toolLabel}…</span>}
+                    </>
+                  )}
+                </div>
               </div>
             </>
           )}

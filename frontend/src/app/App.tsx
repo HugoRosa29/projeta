@@ -6,6 +6,7 @@ import { InvitePage } from "../features/auth/InvitePage";
 import { LoginPage } from "../features/auth/AuthPages";
 import { OkrPage } from "../features/okrs/OkrPage";
 import { PortfolioPage } from "../features/portfolio/PortfolioPage";
+import { ProfilePage } from "../features/profile/ProfilePage";
 import { ProjectPage } from "../features/projects/ProjectPage";
 import { ProjectsPage } from "../features/projects/ProjectsPage";
 import { SettingsPage } from "../features/settings/SettingsPage";
@@ -40,6 +41,7 @@ function Protected() {
             <Route path="minhas-tarefas" element={<MyTasksPage />} />
             <Route path="agenda" element={<AgendaPage />} />
             <Route path="configuracoes" element={<SettingsPage />} />
+            <Route path="perfil" element={<ProfilePage />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Route>
         </Routes>

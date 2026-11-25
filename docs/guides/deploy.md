@@ -47,7 +47,9 @@ Mesmos nomes e padrões do desenvolvimento (ver `.env.example`):
 | `GIA_VERIFY_SSL` | `true` | Verificação de certificado do GIA |
 | `ASSISTANT_PROVIDER` | `mock` | `openai` para o assistente real |
 | `OPENAI_API_KEY` | vazio | Chave do provedor, quando `ASSISTANT_PROVIDER=openai` |
-| `OPENAI_MODEL` | `gpt-5-mini` | Modelo do provedor |
+| `OPENAI_MODEL` | `gpt-5.5` | Modelo do provedor |
+| `OPENAI_REASONING_EFFORT` | `low` | Esforço de raciocínio: o maior fator de latência. `none` (gpt-5.1+) ou `minimal` (gpt-5) são mais rápidos; `medium` é o padrão do provedor |
+| `OPENAI_TEXT_VERBOSITY` | `low` | Tamanho das respostas (`low`, `medium`, `high`) |
 
 O `docker-compose.override.yml` local (que fixa `gia-api` a um IP) não é versionado nem usado em produção. Se o servidor não resolver `gia-api`, aponte `GIA_SERVICE` para um nome ou IP que ele alcance — observando que o GIA roteia pelo nome do host.
 

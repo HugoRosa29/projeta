@@ -34,6 +34,10 @@
 .project-bar .quick-add { flex: 0 1 380px; margin: 0; }
 .project-bar .quick-add .input { min-height: 40px; padding: 6px 12px; }
 .project-bar .quick-add .btn { min-height: 40px; padding: 0 16px; }
+/* Tipo (tarefa/marco/subtarefa) e o campo extra dele dividem a faixa com o título. */
+.project-bar .quick-add-kinds { flex-basis: 620px; gap: 8px; }
+.project-bar .quick-add .quick-kind { flex: 0 0 auto; width: auto; }
+.project-bar .quick-add .quick-extra { flex: 0 1 170px; min-width: 0; }
 @container projeto (max-width: 760px) { .project-bar .quick-add { flex: 1 1 100%; } }
 
 .project-view { min-width: 0; }
@@ -131,7 +135,6 @@
   .pv-stack > .board .column-list { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; align-content: start; padding: 2px; margin: -2px; }
   .pv-scroll { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding-right: 4px; }
   .pv-timeline { height: 100%; }
-  .pv-timeline .timeline { align-content: start; padding-right: 4px; }
 
   @container projeto (min-width: 940px) {
     .project-view.pv-visao { overflow: hidden; }

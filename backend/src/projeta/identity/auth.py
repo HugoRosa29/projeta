@@ -57,25 +57,40 @@ def _free_email(ctx: Ctx, matricula: str, email: str, user_id: str | None) -> st
 
 
 def _join_allotment_workspace(ctx: Ctx, user_id: str, allotment: str) -> None:
-    """Espaço de equipe comum da lotação: criado na primeira entrada, depois só recebe membros.
+    """Espaço de equipe da lotação: criado na primeira entrada, depois só recebe membros.
 
-    É o espaço oficial da unidade no organograma (`org_unit`, pela sigla da lotação; ver
-    migração 016). Quem chega entra como `manager`. O Gestor é o titular da unidade
-    (`org_unit_heads`, ADR 0007), posto por `_seat_unit_heads`. Só em espaço sem titular
-    cadastrado vale a regra antiga: o primeiro lotado a entrar vira Gestor (ADR 0004). A lotação
-    vem do GIA, então ninguém se declara de outra unidade.
+    Lotação que tem sigla do organograma (`DIRAU`, `COINT/COTIN/DIRAU`,
+    `DIRAU - DIRAU - DIVISÃO DE ...`) leva ao espaço oficial daquela unidade (`org_unit`,
+    migração 016): vale só a sigla, o resto do texto do GIA não separa ninguém. Lotação sem
+    sigla conhecida fica num espaço comum identificado pelo texto, fora da organização.
+    Quem chega entra como `manager`. O Gestor é o titular da unidade (`org_unit_heads`,
+    ADR 0007), posto por `_seat_unit_heads`. Só em espaço sem titular cadastrado vale a regra
+    antiga: o primeiro lotado a entrar vira Gestor (ADR 0004). A lotação vem do GIA, então
+    ninguém se declara de outra unidade.
     """
-    ctx.run(
-        "INSERT INTO workspaces(name, kind, allotment, created_by, org_unit) "
-        "SELECT %s,'team',%s,%s, CASE WHEN EXISTS (SELECT 1 FROM workspaces o "
-        "  WHERE o.org_unit = projeta_unit_for_allotment(%s)) THEN NULL "
-        "  ELSE projeta_unit_for_allotment(%s) END "
-        "ON CONFLICT (lower(allotment)) WHERE allotment IS NOT NULL DO NOTHING",
-        (allotment, allotment, user_id, allotment, allotment),
-    )
-    ws = ctx.one(
-        "SELECT id FROM workspaces WHERE lower(allotment) = lower(%s) FOR UPDATE", (allotment,)
-    )
+    unit = ctx.one("SELECT projeta_unit_for_allotment(%s) AS sigla", (allotment,))
+    sigla = unit["sigla"] if unit else None
+    if sigla:
+        # `allotment` só é gravado se o texto estiver livre: outro espaço pode já tê-lo (um
+        # espaço comum de antes desta regra), e o vínculo aqui é pela sigla, não pelo texto.
+        ctx.run(
+            "INSERT INTO workspaces(name, kind, allotment, created_by, org_unit) "
+            "SELECT u.label, 'team', CASE WHEN EXISTS (SELECT 1 FROM workspaces o "
+            "  WHERE lower(o.allotment) = lower(%s)) THEN NULL ELSE %s END, %s, u.sigla "
+            "FROM org_units u WHERE u.sigla = %s ON CONFLICT DO NOTHING",
+            (allotment, allotment, user_id, sigla),
+        )
+        ws = ctx.one("SELECT id FROM workspaces WHERE org_unit = %s FOR UPDATE", (sigla,))
+    else:
+        ctx.run(
+            "INSERT INTO workspaces(name, kind, allotment, created_by) VALUES (%s,'team',%s,%s) "
+            "ON CONFLICT (lower(allotment)) WHERE allotment IS NOT NULL DO NOTHING",
+            (allotment, allotment, user_id),
+        )
+        ws = ctx.one(
+            "SELECT id FROM workspaces WHERE lower(allotment) = lower(%s) FOR UPDATE",
+            (allotment,),
+        )
     if not ws:
         return
     # O bloqueio da linha do espaço serializa duas primeiras entradas simultâneas.

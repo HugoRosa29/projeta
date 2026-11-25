@@ -66,6 +66,10 @@ export interface Task {
   is_milestone: boolean;
   /** Tarefas do mesmo projeto que precisam terminar antes desta. */
   depends_on_ids?: string[];
+  /** Dependências ainda em aberto (o servidor envia título e prazo: elas podem não estar na lista). */
+  waiting_on?: { id: string; title: string; status: Status; due_date: string | null }[];
+  /** Quantas tarefas em aberto esperam por esta. */
+  blocking_count?: number;
   labels: string[];
   version: number;
   created_at: string;
@@ -140,6 +144,7 @@ export const ACTIVITY_LABEL: Record<string, string> = {
   "project.tep_saved": "salvou o Termo de Encerramento",
   "task.created": "criou a tarefa",
   "task.updated": "editou a tarefa",
+  "task.rescheduled": "reprogramou (seguindo a dependência) a tarefa",
   "task.status_changed": "mudou o estado da tarefa",
   "task.deleted": "removeu a tarefa",
   "task.commented": "comentou na tarefa",

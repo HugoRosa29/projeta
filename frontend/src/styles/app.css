@@ -72,6 +72,10 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .nav-links a:hover { background: var(--paper-deep); }
 .nav-links a[aria-current="page"] { background: var(--verde-tint); color: var(--verde-deep); }
 .nav-foot { margin-top: auto; display: grid; gap: 8px; }
+.nav-profile { display: flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 12px; border-radius: var(--radius-sm); text-decoration: none; }
+.nav-profile:hover { background: var(--paper-deep); }
+.nav-profile[aria-current="page"] { background: var(--verde-tint); color: var(--verde-deep); }
+.topbar-profile { display: none; }
 .main { padding: 28px clamp(16px, 3vw, 40px) 60px; min-width: 0; max-width: 1180px; width: 100%; }
 .topbar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 22px; }
 .topbar .spacer { flex: 1; }
@@ -90,6 +94,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 @media (max-width: 820px) {
   .shell, .shell.with-assistant { grid-template-columns: minmax(0, 1fr); }
   .nav { display: none; }
+  .topbar-profile { display: inline-flex; }
   .main { padding: 18px 16px 96px; }
   .assistant-panel { inset: 0; width: 100%; }
   .bottom-nav { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); position: fixed; bottom: 0; left: 0; right: 0; z-index: 50; background: var(--surface); border-top: 1px solid var(--line); padding-bottom: env(safe-area-inset-bottom); }
@@ -170,47 +175,6 @@ button, input, select, textarea { font: inherit; color: inherit; }
 @media (max-width: 820px) { .cal .day { min-height: 56px; } .cal .item { font-size: 0; height: 8px; padding: 0; } }
 
 /* ---------- cronograma ---------- */
-.timeline { display: grid; gap: 6px; }
-.tl-row { display: grid; grid-template-columns: minmax(120px, 220px) 1fr; gap: 12px; align-items: center; font-size: 0.875rem; }
-.tl-track { position: relative; height: 22px; background: var(--paper-deep); border-radius: 6px; }
-.tl-bar { position: absolute; top: 3px; bottom: 3px; border-radius: 4px; background: var(--azul); min-width: 8px; }
-.tl-bar.done { background: var(--verde); }
-.tl-bar.blocked { background: var(--alerta); }
-.tl-bar.milestone { background: var(--dourado); width: 14px; transform: rotate(45deg); top: 4px; bottom: 4px; min-width: 14px; }
-/* Sem início definido: a barra parte da criação, então é estimativa (traço mais claro). */
-.tl-bar.no-start { background-image: repeating-linear-gradient(90deg, transparent 0 6px, color-mix(in srgb, var(--surface) 55%, transparent) 6px 10px); }
-.tl-bar.conflict { outline: 2px solid var(--alerta); outline-offset: 1px; }
-.tl-title { display: flex; align-items: center; gap: 4px; text-align: left; background: none; border: 0; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
-.tl-warn { color: var(--alerta); flex: none; }
-.tl-legend { margin-top: 10px; display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
-.tl-head { display: flex; justify-content: space-between; gap: 6px 16px; flex-wrap: wrap; margin-bottom: 10px; }
-.tl-hint { display: flex; align-items: center; gap: 4px; }
-.tl-banner { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; padding: 6px 6px 6px 12px; margin-bottom: 10px; border-radius: var(--radius-sm); background: color-mix(in srgb, var(--azul) 12%, var(--surface)); font-size: 0.875rem; }
-
-/* Gantt: linhas de altura fixa (as setas dependem disso) e camada de setas sobre a faixa das barras. */
-.gantt { --tl-label: 220px; --tl-gap: 12px; display: block; overflow-x: hidden; }
-.gantt-rows { position: relative; }
-.gantt .tl-row { grid-template-columns: var(--tl-label) 1fr; gap: var(--tl-gap); border-radius: 6px; }
-.gantt .tl-track { margin-right: 18px; }
-.gantt-lines { position: absolute; top: 0; bottom: 0; left: calc(var(--tl-label) + var(--tl-gap)); right: 18px; pointer-events: none; }
-.gantt-lines svg { display: block; overflow: visible; }
-.tl-edge-line { fill: none; stroke: color-mix(in srgb, var(--ink-60) 70%, transparent); stroke-width: 1.5; }
-.tl-arrowhead { fill: color-mix(in srgb, var(--ink-60) 70%, transparent); }
-.tl-edge.bad .tl-edge-line { stroke: var(--alerta); stroke-width: 2; }
-.tl-arrowhead.bad { fill: var(--alerta); }
-.tl-edge-hit { fill: none; stroke: transparent; stroke-width: 12; pointer-events: stroke; cursor: pointer; }
-.tl-edge:hover .tl-edge-line { stroke: var(--alerta); stroke-dasharray: 4 3; stroke-width: 2; }
-.tl-drafting { stroke: var(--azul); stroke-width: 2; stroke-dasharray: 5 4; }
-.tl-handle { position: absolute; top: 50%; width: 14px; height: 14px; margin-left: 2px; transform: translateY(-50%); border-radius: 50%; border: 2px solid var(--azul); background: var(--surface); cursor: crosshair; padding: 0; z-index: 2; touch-action: none; opacity: 0.35; transition: opacity 0.15s, transform 0.15s; }
-.tl-row:hover .tl-handle, .tl-handle:focus-visible, .tl-handle[aria-pressed="true"] { opacity: 1; }
-.tl-handle:hover, .tl-handle[aria-pressed="true"] { transform: translateY(-50%) scale(1.25); background: var(--azul); }
-.tl-linking .tl-target-ok { background: color-mix(in srgb, var(--azul) 7%, transparent); cursor: pointer; }
-.tl-linking .tl-target-no { opacity: 0.45; }
-.tl-linking .tl-over, .tl-linking .tl-target-ok:hover { background: color-mix(in srgb, var(--azul) 18%, transparent); }
-.tl-pick { position: absolute; inset: 0; z-index: 1; background: transparent; border: 0; padding: 0; cursor: pointer; border-radius: 6px; }
-.tl-source { background: color-mix(in srgb, var(--azul) 12%, transparent); }
-@media (max-width: 700px) { .gantt { --tl-label: 120px; --tl-gap: 8px; } }
-@media (hover: none) { .tl-handle { opacity: 0.8; width: 18px; height: 18px; } }
 /* Arrastar uma tarefa sobre outra na lista cria a dependência. */
 .task-row.dep-draggable { cursor: grab; }
 .task-row.dep-dragging { opacity: 0.5; }
@@ -219,6 +183,9 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .dep-grip { color: var(--ink-60); flex: none; align-self: center; }
 .dep-drop-hint { color: var(--azul); font-weight: 600; }
 .dep-tip { display: flex; align-items: center; gap: 6px; margin: 0 0 8px; }
+.start-linked { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin: -4px 0 12px; font-size: 0.8125rem; }
+.badge-btn { border: 0; cursor: pointer; font-family: inherit; }
+.badge-btn:disabled { cursor: default; }
 /* Seletor de dependência na linha da lista: compacto, cabe junto às etiquetas. */
 .task-meta .dep-pick { width: auto; min-height: 32px; padding: 2px 8px; font-size: 0.8125rem; max-width: 220px; }
 

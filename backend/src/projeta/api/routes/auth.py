@@ -63,6 +63,12 @@ def me(user: dict = Depends(current_user)) -> dict:
         return {"user": user, "workspaces": workspaces.list_my_workspaces(ctx)}
 
 
+@router.get("/me/profile")
+def my_profile(user: dict = Depends(current_user)) -> dict:
+    with uow(user["id"]) as ctx:
+        return workspaces.my_profile(ctx)
+
+
 @router.patch("/me/timezone", status_code=204)
 def my_timezone(body: TimezoneIn, user: dict = Depends(current_user)) -> None:
     with uow(user["id"]) as ctx:

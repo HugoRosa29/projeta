@@ -16,6 +16,7 @@ from ..identity.access import (
     task_access,
 )
 from .activity import log_activity
+from .schedule import cascade, linked_start
 from .sprints import assert_target, move_tasks
 
 STATUSES = ("todo", "doing", "blocked", "done")
@@ -329,6 +330,12 @@ def update_task(
     for k in ("start_date", "due_date"):
         if k in fields and not fields[k]:
             fields[k] = None  # "" = limpar a data, como nulo
+    forced = linked_start(ctx, task_id)
+    if forced and "start_date" in fields and fields["start_date"] != forced:
+        raise BadRequestError(
+            "O início desta tarefa segue as dependências: ela começa no dia seguinte ao prazo da "
+            "anterior. Para mudar, ajuste o prazo da tarefa anterior ou remova a dependência."
+        )
     _assert_start_before_due(
         fields["start_date"] if "start_date" in fields else task["start_date"],
         fields["due_date"] if "due_date" in fields else task["due_date"],
@@ -384,6 +391,8 @@ def update_task(
         )
     if sprint_changed:
         move_tasks(ctx, [task_id], new_sprint)
+    if "due_date" in sets and str(sets["due_date"] or "") != str(task["due_date"] or ""):
+        cascade(ctx, [task_id], include_seeds=False, via=via)  # quem depende desta anda junto
     after = ctx.one(f"{TASK_SELECT} WHERE t.id=%s", (task_id,))
     assert after
     if task["project_id"]:
@@ -454,6 +463,7 @@ def add_dependency(ctx: Ctx, task_id: str, depends_on_id: str) -> None:
         (task_id, depends_on_id),
     )
     ctx.run("UPDATE tasks SET version = version + 1 WHERE id=%s", (task_id,))
+    cascade(ctx, [task_id], include_seeds=True)  # passa a começar depois da nova anterior
 
 
 def remove_dependency(ctx: Ctx, task_id: str, depends_on_id: str) -> None:
@@ -465,6 +475,8 @@ def remove_dependency(ctx: Ctx, task_id: str, depends_on_id: str) -> None:
         (task_id, depends_on_id),
     )
     ctx.run("UPDATE tasks SET version = version + 1 WHERE id=%s", (task_id,))
+    # Com outras anteriores, o início pode recuar; sem nenhuma, a data atual fica e volta a ser livre.
+    cascade(ctx, [task_id], include_seeds=True)
 
 
 def list_agenda(ctx: Ctx, workspace_id: str, start: str, end: str) -> list[dict]:

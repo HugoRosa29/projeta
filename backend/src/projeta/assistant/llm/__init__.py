@@ -1,6 +1,6 @@
 from ...errors import UpstreamError
 from ...settings import get_settings
-from .base import HistoryMessage, LLMClient, LLMResult
+from .base import EventSink, HistoryMessage, LLMClient, LLMResult
 
 
 def get_llm() -> LLMClient:
@@ -16,7 +16,12 @@ def get_llm() -> LLMClient:
         )
     from .openai_client import OpenAIResponsesLLM
 
-    return OpenAIResponsesLLM(s.openai_api_key, s.openai_model)
+    return OpenAIResponsesLLM(
+        s.openai_api_key,
+        s.openai_model,
+        reasoning_effort=s.openai_reasoning_effort,
+        text_verbosity=s.openai_text_verbosity,
+    )
 
 
-__all__ = ["HistoryMessage", "LLMClient", "LLMResult", "get_llm"]
+__all__ = ["EventSink", "HistoryMessage", "LLMClient", "LLMResult", "get_llm"]

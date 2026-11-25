@@ -7,6 +7,9 @@ from dataclasses import dataclass
 from typing import Protocol
 
 ToolExecutor = Callable[[str, dict], dict]
+# Eventos de progresso para a interface: {"type": "delta", "text": ...} (trecho da resposta) e
+# {"type": "reset"} (o texto parcial era preâmbulo de uma rodada de ferramentas; descarte-o).
+EventSink = Callable[[dict], None]
 
 
 @dataclass
@@ -31,6 +34,10 @@ class LLMClient(Protocol):
         tools: list[dict],
         execute: ToolExecutor,
         max_rounds: int,
+        on_event: EventSink | None = None,
     ) -> LLMResult:
-        """Conduz a conversa (inclusive o laço de ferramentas) e devolve o texto final."""
+        """Conduz a conversa (inclusive o laço de ferramentas) e devolve o texto final.
+
+        Com `on_event`, o provedor pode emitir a resposta aos poucos; sem ele, nada muda.
+        """
         ...

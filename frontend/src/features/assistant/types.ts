@@ -81,3 +81,10 @@ export interface Conversation {
   conversation_id: string | null;
   messages: ChatMessage[];
 }
+
+/** Linhas do NDJSON de /assistant/chat/stream (o erro vira ApiError em `api.stream`). */
+export type StreamEvent =
+  | { type: "delta"; text: string }
+  | { type: "reset" }
+  | { type: "tool"; label: string }
+  | { type: "done"; conversation_id: string; message: ChatMessage };
