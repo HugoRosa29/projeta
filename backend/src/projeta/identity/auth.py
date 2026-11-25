@@ -117,7 +117,20 @@ def _seat_unit_heads(ctx: Ctx, user_id: str, allotment: str) -> None:
     criar o espaço de uma unidade cujo titular já tem conta. Compara pelo nome vindo do GIA e
     só em contas com matrícula: em conta local o nome é digitado por quem se cadastra.
     Se um Gestor rebaixar o titular, ele volta a Gestor na próxima entrada: a planilha manda.
+    Unidade que ele chefia e ainda não tem espaço oficial ganha um agora: sem isso o titular
+    ficaria sem espaço até alguém lotado nela entrar, ou para sempre, se a lotação dele no GIA
+    não trouxer a sigla.
     """
+    ctx.run(
+        "INSERT INTO workspaces(name, kind, created_by, org_unit) "
+        "SELECT ou.label, 'team', u.id, ou.sigla FROM org_unit_heads h "
+        "JOIN org_units ou ON ou.sigla = h.sigla "
+        "JOIN users u ON u.id = %s AND u.matricula IS NOT NULL "
+        "  AND projeta_name_key(u.name) = projeta_name_key(h.name) "
+        "WHERE NOT EXISTS (SELECT 1 FROM workspaces w WHERE w.org_unit = h.sigla) "
+        "ON CONFLICT DO NOTHING",
+        (user_id,),
+    )
     ctx.run(
         "INSERT INTO workspace_members(workspace_id, user_id, role) "
         "SELECT w.id, u.id, 'admin' FROM org_unit_heads h "
