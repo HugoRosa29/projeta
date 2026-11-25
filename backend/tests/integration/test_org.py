@@ -256,6 +256,46 @@ def test_titular_de_unidade_fora_da_propria_lotacao_vira_gestor_dela():
     assert _role(lotado, ws_gepes) == "manager"
 
 
+def _official(sigla: str) -> str | None:
+    with uow(NOBODY) as ctx:
+        row = ctx.one("SELECT id FROM workspaces WHERE org_unit = %s", (sigla,))
+    return row["id"] if row else None
+
+
+def test_titular_ganha_o_espaco_da_unidade_mesmo_sem_ninguem_lotado_nela():
+    # Lotação do titular no GIA sem a sigla da unidade que ele chefia.
+    titular = make_user("dirau1", allotment="SETOR SEM SIGLA", full_name=HEADS["DIRAU"])
+    ws = _official("DIRAU")
+    assert ws and _role(titular, ws) == "admin"
+    lotado = make_user("dirau2", allotment="DIRAU - DIRAU - DIVISÃO DE INFRAESTRUT")
+    assert _unit_ws(lotado) == ws and _role(lotado, ws) == "manager"
+
+
+def _run_migration(name: str) -> None:
+    with db.transaction() as conn:
+        conn.execute((MIGRATIONS / name).read_text(encoding="utf-8"))
+
+
+def test_migracao_cria_o_espaco_da_unidade_para_titular_que_ja_tinha_conta():
+    titular = make_user("dirau1", full_name=HEADS["DIRAU"])
+    # Estado de antes da correção: titular com conta e nenhum espaço oficial da DIRAU.
+    with uow(NOBODY) as ctx:
+        ctx.run("DELETE FROM workspaces WHERE org_unit = 'DIRAU'")
+    assert _official("DIRAU") is None
+    _run_migration("024_unit_heads_get_official_space.sql")
+    ws = _official("DIRAU")
+    assert ws and _role(titular, ws) == "admin"
+
+
+def test_migracao_adota_espaco_comum_antigo_da_lotacao_como_oficial():
+    lotado = make_user("dirau2", allotment="DIRAU - DIRAU - DIVISÃO DE INFRAESTRUT")
+    antigo = _unit_ws(lotado)
+    with uow(NOBODY) as ctx:
+        ctx.run("UPDATE workspaces SET org_unit = NULL WHERE id = %s", (antigo,))
+    _run_migration("024_unit_heads_get_official_space.sql")
+    assert _official("DIRAU") == antigo
+
+
 def test_titular_rebaixado_volta_a_gestor_na_proxima_entrada():
     titular = make_user("cotin1", allotment="COTIN", full_name=HEADS["COTIN"])
     outro = make_user("cotin2", allotment="COTIN")
