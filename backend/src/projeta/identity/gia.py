@@ -16,6 +16,8 @@ logger = logging.getLogger(__name__)
 # O GIA devolve chaves em português que variam entre ambientes (mesma lista do plugin gia-auth).
 _NAME_KEYS = ("name", "nm_usuario", "no_usuario", "nm_pessoa", "nome")
 _EMAIL_KEYS = ("email", "ds_email", "nm_email", "email_institucional")
+# Lotação: em produção o GIA manda só a sigla em `sg_lotacao` (ex.: "DIRAU").
+_ALLOTMENT_KEYS = ("sg_lotacao", "allotment")
 
 
 def _pick(body: dict[str, Any], keys: tuple[str, ...]) -> str:
@@ -64,10 +66,9 @@ def authenticate(matricula: str, password: str, station: str) -> dict:
     if not isinstance(body, dict) or not body.get("cd_usuario"):
         raise refusal
 
-    allotment = body.get("allotment")
     return {
         "gia_code": str(body["cd_usuario"]),
         "name": _pick(body, _NAME_KEYS),
         "email": _pick(body, _EMAIL_KEYS).lower(),
-        "allotment": " ".join(allotment.split()) if isinstance(allotment, str) else "",
+        "allotment": " ".join(_pick(body, _ALLOTMENT_KEYS).split()),
     }
