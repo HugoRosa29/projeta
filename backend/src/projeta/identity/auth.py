@@ -59,19 +59,58 @@ def _free_email(ctx: Ctx, matricula: str, email: str, user_id: str | None) -> st
 def _join_allotment_workspace(ctx: Ctx, user_id: str, allotment: str) -> None:
     """Espaço de equipe comum da lotação: criado na primeira entrada, depois só recebe membros.
 
-    Todos entram como `manager` (membro não cria projeto, e o espaço precisa ser útil a quem
-    chega); administrar o espaço (papéis e convites) é decisão posterior, não de quem
-    chegou primeiro.
+    É o espaço oficial da unidade no organograma (`org_unit`, pela sigla da lotação; ver
+    migração 016). Quem chega entra como `manager`. O Gestor é o titular da unidade
+    (`org_unit_heads`, ADR 0007), posto por `_seat_unit_heads`. Só em espaço sem titular
+    cadastrado vale a regra antiga: o primeiro lotado a entrar vira Gestor (ADR 0004). A lotação
+    vem do GIA, então ninguém se declara de outra unidade.
     """
     ctx.run(
-        "INSERT INTO workspaces(name, kind, allotment, created_by) VALUES (%s,'team',%s,%s) "
+        "INSERT INTO workspaces(name, kind, allotment, created_by, org_unit) "
+        "SELECT %s,'team',%s,%s, CASE WHEN EXISTS (SELECT 1 FROM workspaces o "
+        "  WHERE o.org_unit = projeta_unit_for_allotment(%s)) THEN NULL "
+        "  ELSE projeta_unit_for_allotment(%s) END "
         "ON CONFLICT (lower(allotment)) WHERE allotment IS NOT NULL DO NOTHING",
-        (allotment, allotment, user_id),
+        (allotment, allotment, user_id, allotment, allotment),
     )
+    ws = ctx.one(
+        "SELECT id FROM workspaces WHERE lower(allotment) = lower(%s) FOR UPDATE", (allotment,)
+    )
+    if not ws:
+        return
+    # O bloqueio da linha do espaço serializa duas primeiras entradas simultâneas.
+    has_admin = ctx.one(
+        "SELECT 1 AS x FROM workspace_members WHERE workspace_id=%s AND role='admin' "
+        "UNION ALL SELECT 1 FROM workspaces w JOIN org_unit_heads h ON h.sigla = w.org_unit "
+        "WHERE w.id=%s",
+        (ws["id"], ws["id"]),
+    )
+    role = "manager" if has_admin else "admin"
+    ctx.run(
+        "INSERT INTO workspace_members(workspace_id, user_id, role) VALUES (%s,%s,%s) "
+        "ON CONFLICT (workspace_id, user_id) DO UPDATE SET role = "
+        "CASE WHEN EXCLUDED.role = 'admin' THEN 'admin' ELSE workspace_members.role END",
+        (ws["id"], user_id, role),
+    )
+
+
+def _seat_unit_heads(ctx: Ctx, user_id: str, allotment: str) -> None:
+    """Titular da planilha vira Gestor do espaço oficial da unidade (ADR 0007).
+
+    Cobre os dois lados: a pessoa que entra é titular de unidades cujo espaço já existe (mesmo
+    fora da própria lotação, como quem responde por GEPES e SESMT), ou a entrada dela acabou de
+    criar o espaço de uma unidade cujo titular já tem conta. Compara pelo nome vindo do GIA e
+    só em contas com matrícula: em conta local o nome é digitado por quem se cadastra.
+    Se um Gestor rebaixar o titular, ele volta a Gestor na próxima entrada: a planilha manda.
+    """
     ctx.run(
         "INSERT INTO workspace_members(workspace_id, user_id, role) "
-        "SELECT id, %s, 'manager' FROM workspaces WHERE lower(allotment) = lower(%s) "
-        "ON CONFLICT DO NOTHING",
+        "SELECT w.id, u.id, 'admin' FROM org_unit_heads h "
+        "JOIN workspaces w ON w.org_unit = h.sigla "
+        "JOIN users u ON u.matricula IS NOT NULL "
+        "  AND projeta_name_key(u.name) = projeta_name_key(h.name) "
+        "WHERE u.id = %s OR w.org_unit = projeta_unit_for_allotment(%s) "
+        "ON CONFLICT (workspace_id, user_id) DO UPDATE SET role = 'admin'",
         (user_id, allotment),
     )
 
@@ -129,6 +168,7 @@ def provision_user(
         _create_personal_space(ctx, user["id"], name)
     if allotment:
         _join_allotment_workspace(ctx, user["id"], allotment)
+    _seat_unit_heads(ctx, user["id"], allotment)
     _claim_project_invites(ctx, user["id"], matricula)
     return user
 

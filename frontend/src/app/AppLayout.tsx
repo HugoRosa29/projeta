@@ -1,6 +1,6 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { CalendarDays, CheckSquare, FolderKanban, House, LayoutDashboard, MessageCircle, Settings } from "lucide-react";
-import { useState } from "react";
+import { CalendarDays, CheckSquare, FolderKanban, House, LayoutDashboard, MessageCircle, Settings, Target } from "lucide-react";
+import { useCallback, useMemo, useState } from "react";
 import { NavLink, Outlet } from "react-router";
 import { Logo } from "../components/ui";
 import { ThemeToggle } from "../components/ThemeToggle";
@@ -8,6 +8,7 @@ import { Skyline } from "../components/Skyline";
 import { useMotion } from "../components/motion";
 import { AssistantPanel } from "../features/assistant/AssistantPanel";
 import { api } from "../services/api";
+import { AssistantContext } from "./assistantContext";
 import { useProjectContext } from "./projectContext";
 import { useSession } from "./session";
 
@@ -15,6 +16,7 @@ const LINKS = [
   { to: "/", label: "Hoje", icon: House, end: true },
   { to: "/projetos", label: "Projetos", icon: FolderKanban },
   { to: "/portfolio", label: "Portfólio", icon: LayoutDashboard },
+  { to: "/metas", label: "Metas", full: "Metas (OKRs)", icon: Target },
   { to: "/minhas-tarefas", label: "Tarefas", full: "Minhas tarefas", icon: CheckSquare },
   { to: "/agenda", label: "Agenda", icon: CalendarDays },
   { to: "/configuracoes", label: "Ajustes", full: "Configurações", icon: Settings },
@@ -25,6 +27,13 @@ export function AppLayout() {
   const { project } = useProjectContext();
   const [assistantOpen, setAssistantOpen] = useState(false);
   const [expanded, setExpanded] = useState(false);
+  // `seq` muda a cada pedido, para o mesmo rascunho poder ser aplicado de novo.
+  const [draft, setDraft] = useState<{ text: string; seq: number } | null>(null);
+  const openAssistant = useCallback((text?: string) => {
+    setAssistantOpen(true);
+    if (text) setDraft((d) => ({ text, seq: (d?.seq ?? 0) + 1 }));
+  }, []);
+  const assistant = useMemo(() => ({ openAssistant }), [openAssistant]);
   const qc = useQueryClient();
   useMotion();
 
@@ -35,6 +44,7 @@ export function AppLayout() {
   };
 
   return (
+    <AssistantContext.Provider value={assistant}>
     <div className={`shell ${assistantOpen && !expanded ? "with-assistant" : ""}`}>
       <a href="#main" className="skip-link">Pular para o conteúdo</a>
       <div className="scroll-progress" aria-hidden="true" />
@@ -70,7 +80,7 @@ export function AppLayout() {
         </main>
       </div>
 
-      {assistantOpen && <AssistantPanel expanded={expanded} onToggleExpand={() => setExpanded((v) => !v)} onClose={() => (setAssistantOpen(false), setExpanded(false))} />}
+      {assistantOpen && <AssistantPanel draft={draft} expanded={expanded} onToggleExpand={() => setExpanded((v) => !v)} onClose={() => (setAssistantOpen(false), setExpanded(false))} />}
 
       <nav className="bottom-nav" aria-label="Navegação principal (celular)">
         {LINKS.map(({ to, label, icon: Icon, end }) => (
@@ -78,5 +88,6 @@ export function AppLayout() {
         ))}
       </nav>
     </div>
+    </AssistantContext.Provider>
   );
 }

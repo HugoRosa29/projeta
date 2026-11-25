@@ -6,6 +6,10 @@ import { App } from "./app/App";
 import { ToastProvider } from "./components/ui";
 import "./styles/app.css";
 import "./styles/motion.css";
+import "./styles/okr.css";
+import "./styles/panorama.css";
+import "./styles/sprints.css";
+import "./styles/project.css";
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { staleTime: 15_000, refetchOnWindowFocus: false } },

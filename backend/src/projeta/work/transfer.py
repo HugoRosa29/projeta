@@ -115,6 +115,21 @@ class ProjectX(_M):
     cover: CoverX | None = None
     status_notes: list[NoteX] = Field(default_factory=list, max_length=_MAX_ITEMS)
     terms: list[TermX] = Field(default_factory=list, max_length=2)
+    sprints: list[SprintX] = Field(default_factory=list, max_length=5000)
+
+
+class SprintX(_M):
+    ref: Ref = Field(max_length=64)
+    number: int = Field(ge=1)
+    name: str = Field(min_length=1, max_length=200)
+    goal: str = Field(default="", max_length=2000)
+    start_date: date
+    end_date: date
+    status: Literal["planned", "active", "closed"] = "planned"
+    capacity_minutes: int | None = Field(default=None, ge=0)
+    summary: dict[str, Any] | None = None
+    started_at: datetime | None = None
+    closed_at: datetime | None = None
 
 
 class CommentX(_M):
@@ -128,6 +143,7 @@ class TaskX(_M):
     ref: Ref = Field(max_length=64)
     project: Ref | None = None  # nulo = tarefa pessoal de quem exportou
     parent: Ref | None = None
+    sprint: Ref | None = None
     depends_on: list[Ref] = Field(default_factory=list, max_length=500)
     title: str = Field(max_length=200)
     description: str = Field(default="", max_length=50_000)
@@ -135,6 +151,7 @@ class TaskX(_M):
     priority: str = "medium"
     assignee: Ref | None = None
     created_by: Ref | None = None
+    start_date: str | None = None
     due_date: str | None = None
     estimate_minutes: int | None = None
     progress: int = 0
@@ -214,6 +231,7 @@ def export_workspace(ctx: Ctx, workspace_id: str) -> dict:
 
     projects_out: list[dict] = []
     pref: dict[str, Ref] = {}
+    sref: dict[str, Ref] = {}
     for p in ctx.all(
         "SELECT * FROM projects WHERE workspace_id=%s ORDER BY created_at, id", (workspace_id,)
     ):
@@ -287,6 +305,29 @@ def export_workspace(ctx: Ctx, workspace_id: str) -> dict:
                         "SELECT * FROM project_terms WHERE project_id=%s ORDER BY kind", (pid,)
                     )
                 ],
+                "sprints": [
+                    {
+                        "ref": sref.setdefault(str(sp["id"]), f"s{len(sref) + 1}"),
+                        **{
+                            k: sp[k]
+                            for k in (
+                                "number",
+                                "name",
+                                "goal",
+                                "status",
+                                "capacity_minutes",
+                                "summary",
+                            )
+                        },
+                        "start_date": _iso(sp["start_date"]),
+                        "end_date": _iso(sp["end_date"]),
+                        "started_at": _iso(sp["started_at"]),
+                        "closed_at": _iso(sp["closed_at"]),
+                    }
+                    for sp in ctx.all(
+                        "SELECT * FROM sprints WHERE project_id=%s ORDER BY number", (pid,)
+                    )
+                ],
             }
         )
 
@@ -314,6 +355,7 @@ def export_workspace(ctx: Ctx, workspace_id: str) -> dict:
                 "ref": tref[tid],
                 "project": pref.get(str(t["project_id"])) if t["project_id"] else None,
                 "parent": tref.get(str(t["parent_id"])) if t["parent_id"] else None,
+                "sprint": sref.get(str(t["sprint_id"])) if t["sprint_id"] else None,
                 "depends_on": deps.get(tid, []),
                 **{
                     k: t[k]
@@ -330,6 +372,7 @@ def export_workspace(ctx: Ctx, workspace_id: str) -> dict:
                         "position",
                     )
                 },
+                "start_date": _iso(t["start_date"]),
                 "due_date": _iso(t["due_date"]),
                 "assignee": person(t["assignee_id"]),
                 "created_by": person(t["created_by"]),
@@ -432,6 +475,13 @@ def _check_refs(f: ExportFile) -> None:
             raise BadRequestError(f"Arquivo inválido: {what} “{ref[:20]}” não existe no arquivo.")
 
     need(f.exporter, people, "pessoa")
+    sprint_of: dict[Ref, Ref] = {}  # sprint -> projeto
+    if len({sp.ref for p in f.projects for sp in p.sprints}) != sum(
+        len(p.sprints) for p in f.projects
+    ):
+        raise BadRequestError(
+            "Arquivo inválido: identificadores repetidos. Gere a exportação de novo."
+        )
     for p in f.projects:
         need(p.created_by, people, "pessoa")
         for m in p.members:
@@ -445,6 +495,14 @@ def _check_refs(f: ExportFile) -> None:
                 raise BadRequestError("Arquivo inválido: campo desconhecido em TAP/TEP.")
         if p.phase is not None and p.phase not in PHASES:
             raise BadRequestError("Arquivo inválido: fase de projeto desconhecida.")
+        if sum(1 for sp in p.sprints if sp.status == "active") > 1:
+            raise BadRequestError("Arquivo inválido: mais de uma sprint em andamento no projeto.")
+        if len({sp.number for sp in p.sprints}) != len(p.sprints):
+            raise BadRequestError("Arquivo inválido: sprints com o mesmo número no projeto.")
+        for sp in p.sprints:
+            if sp.end_date < sp.start_date:
+                raise BadRequestError("Arquivo inválido: sprint que termina antes de começar.")
+            sprint_of[sp.ref] = p.ref
     for t in f.tasks:
         need(t.project, projs, "projeto")
         need(t.parent, tasks, "tarefa")
@@ -458,6 +516,8 @@ def _check_refs(f: ExportFile) -> None:
             mother = tasks[t.parent]
             if mother.parent or mother.project != t.project or t.parent == t.ref:
                 raise BadRequestError("Arquivo inválido: subtarefa fora da regra de um nível.")
+        if t.sprint is not None and (t.project is None or sprint_of.get(t.sprint) != t.project):
+            raise BadRequestError("Arquivo inválido: tarefa em sprint de outro projeto.")
     for a in f.activity:
         need(a.project, projs, "projeto")
         need(a.task, tasks, "tarefa")
@@ -522,6 +582,7 @@ def import_workspace(
     summary = {
         "workspace_id": ws,
         "projects": 0,
+        "sprints": 0,
         "tasks": 0,
         "comments": 0,
         "activity": 0,
@@ -569,6 +630,7 @@ def import_workspace(
 
     # Projetos
     pid: dict[Ref, str] = {}
+    sid: dict[Ref, tuple[str, SprintX]] = {}
     invited: set[str] = set()
     for p in f.projects:
         attrs = clean_attributes(p.attributes) or []
@@ -656,15 +718,46 @@ def import_workspace(
                     when(t.updated_at),
                 ),
             )
+        for sp in p.sprints:
+            row = ctx.one(
+                "INSERT INTO sprints(project_id, number, name, goal, start_date, end_date, status, "
+                "capacity_minutes, summary, started_at, closed_at, created_by) "
+                "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id",
+                (
+                    pid[p.ref],
+                    sp.number,
+                    sp.name.strip(),
+                    sp.goal,
+                    sp.start_date,
+                    sp.end_date,
+                    sp.status,
+                    sp.capacity_minutes,
+                    Jsonb(sp.summary) if sp.summary is not None else None,
+                    sp.started_at or (when(None) if sp.status != "planned" else None),
+                    sp.closed_at or (when(None) if sp.status == "closed" else None),
+                    ctx.user_id,
+                ),
+            )
+            assert row
+            sid[sp.ref] = (str(row["id"]), sp)
+            summary["sprints"] += 1
     summary["people_invited"] = len(invited)
 
     # Tarefas: mães antes das filhas (o arquivo garante um nível só).
     tid: dict[Ref, str] = {}
+    f_tasks = {t.ref: t for t in f.tasks}
     for t in sorted(f.tasks, key=lambda x: x.parent is not None):
         fields = t.model_dump(
-            include={"title", "status", "priority", "due_date", "progress", "estimate_minutes"}
-        )
+            include={
+                "title", "status", "priority", "start_date", "due_date", "progress",
+                "estimate_minutes",
+            }
+        )  # fmt: skip
         validate_task(fields, creating=True)
+        if t.start_date and t.due_date and t.start_date > t.due_date:
+            raise BadRequestError(
+                f"A tarefa “{t.title[:60]}” começa depois do prazo. Corrija as datas no arquivo."
+            )
         project = pid[t.project] if t.project else None
         assignee = who(t.assignee)
         if (
@@ -683,8 +776,9 @@ def import_workspace(
         row = ctx.one(
             "INSERT INTO tasks(workspace_id, project_id, owner_id, title, description, status, "
             "priority, assignee_id, due_date, estimate_minutes, progress, phase, is_milestone, "
-            "labels, position, created_by, created_at, updated_at, completed_at, parent_id) "
-            "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id",
+            "labels, position, created_by, created_at, updated_at, completed_at, parent_id, "
+            "start_date) "
+            "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id",
             (
                 ws,
                 project,
@@ -706,11 +800,22 @@ def import_workspace(
                 when(t.updated_at or t.created_at),
                 t.completed_at,
                 tid.get(t.parent) if t.parent else None,
+                t.start_date or None,
             ),
         )
         assert row
         tid[t.ref] = str(row["id"])
         summary["tasks"] += 1
+        # Subtarefa acompanha a sprint da mãe, como na edição normal.
+        mother = f_tasks[t.parent] if t.parent else t
+        if mother.sprint:
+            sprint_id, sp = sid[mother.sprint]
+            ctx.run("UPDATE tasks SET sprint_id=%s WHERE id=%s", (sprint_id, tid[t.ref]))
+            # O histórico de entrada/saída não viaja: a tarefa conta como comprometida.
+            ctx.run(
+                "INSERT INTO sprint_task_log(sprint_id, task_id, added_at) VALUES (%s,%s,%s)",
+                (sprint_id, tid[t.ref], sp.started_at or when(None)),
+            )
         for c in t.comments:
             body = c.body
             if not who(c.author) and c.author:

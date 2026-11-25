@@ -27,7 +27,7 @@ def _date(v: str | None) -> str | None:
 class NewTask(BaseModel):
     title: str = Field(min_length=1, max_length=200)
     due_date: str | None = None
-    priority: Literal["low", "medium", "high"] | None = None
+    priority: Literal["low", "medium", "high", "urgent"] | None = None
     description: str | None = Field(default=None, max_length=2000)
 
     _d = field_validator("due_date")(_date)
@@ -44,7 +44,7 @@ class WbsTask(BaseModel):
     due_date: str | None = None
     estimate_minutes: int | None = Field(default=None, ge=0, le=100_000)
     is_milestone: bool = False
-    priority: Literal["low", "medium", "high"] | None = None
+    priority: Literal["low", "medium", "high", "urgent"] | None = None
     depends_on: list[str] = Field(default_factory=list, max_length=10)
 
     _d = field_validator("due_date")(_date)
@@ -103,7 +103,7 @@ class UpdateChanges(BaseModel):
     status: Literal["todo", "doing", "blocked", "done"] | None = None
     due_date: str | None = None
     progress: int | None = Field(default=None, ge=0, le=100)
-    priority: Literal["low", "medium", "high"] | None = None
+    priority: Literal["low", "medium", "high", "urgent"] | None = None
     assignee_id: str | None = None
     clear_due_date: bool = False
     clear_assignee: bool = False

@@ -68,26 +68,44 @@ describe("agregações do panorama", () => {
 });
 
 describe("Panorama", () => {
-  const show = () => render(<MemoryRouter><Panorama rows={ROWS} workspaceName="Terracap" /></MemoryRouter>);
+  const show = () => render(<MemoryRouter><Panorama rows={ROWS} workspaceName="Terracap" today="2026-11-16" /></MemoryRouter>);
+  const board = () => screen.getByRole("region", { name: "Quadro dos projetos" });
+  const listed = () => within(board()).getAllByRole("link").map((a) => a.textContent);
+  const groups = () => within(board()).getAllByRole("button").map((b) => b.textContent);
+  const stat = (label: string) => within(screen.getByRole("list", { name: "Resumo" })).getByText(label).parentElement;
 
-  it("mostra os indicadores e os projetos com link", () => {
+  it("mostra os números do topo e o quadro agrupado por situação, com links", () => {
     show();
-    expect(screen.getByText("Conclusão média").parentElement).toHaveTextContent("68%");
-    expect(screen.getByText("Tarefas abertas").parentElement).toHaveTextContent("9 de 16");
-    expect(screen.getAllByRole("link", { name: "ERP" })[0]).toHaveAttribute("href", "/projetos/ERP");
-    expect(screen.getByRole("img", { name: /Situação dos projetos: Em dia: 1 projeto \(33%\)/ })).toBeInTheDocument();
+    expect(stat("Conclusão média")).toHaveTextContent("68%");
+    expect(stat("Tarefas atrasadas")).toHaveTextContent("2");
+    expect(within(board()).getByRole("link", { name: "ERP" })).toHaveAttribute("href", "/projetos/ERP");
+    expect(groups()).toEqual(["Atrasado", "Em risco", "Em dia"]);
+    // Cada grupo tem a própria linha de resumo, com a média de progresso.
+    expect(within(screen.getByRole("table", { name: "Atrasado" })).getByText("Média do grupo:").parentElement).toHaveTextContent("80%");
+    // Agrupado por situação, a coluna Situação seria repetição.
+    expect(within(board()).queryAllByRole("columnheader", { name: "Situação" })).toHaveLength(0);
   });
 
-  it("filtra todos os gráficos ao clicar numa situação, e desfaz", async () => {
+  it("filtra o quadro ao clicar num número de situação, e desfaz", async () => {
     const user = userEvent.setup();
     show();
-    await user.click(screen.getByRole("button", { name: /Filtrar por Atrasado/ }));
+    await user.click(screen.getByRole("button", { name: /Filtrar por Atrasados/ }));
     expect(screen.getByText("1 projeto de 3 no recorte")).toBeInTheDocument();
-    const progress = screen.getByRole("heading", { name: "Progresso por projeto" }).closest("article")!;
-    expect(within(progress).getAllByRole("listitem")).toHaveLength(1);
-    expect(screen.getByRole("button", { name: /Filtrar por Atrasado/ })).toHaveAttribute("aria-pressed", "true");
+    expect(listed()).toEqual(["ERP"]);
+    expect(screen.getByRole("button", { name: /Filtrar por Atrasados/ })).toHaveAttribute("aria-pressed", "true");
     await user.click(screen.getByRole("button", { name: "Limpar filtros" }));
-    expect(within(progress).getAllByRole("listitem")).toHaveLength(3);
+    expect(listed()).toHaveLength(3);
+  });
+
+  it("recolhe um grupo e reagrupa por fase, mostrando a situação em cada linha", async () => {
+    const user = userEvent.setup();
+    show();
+    await user.click(within(board()).getByRole("button", { name: /Atrasado/ }));
+    expect(listed()).toEqual(["Portal", "Nuvem"]);
+    await user.selectOptions(screen.getByLabelText("Agrupar por"), "phase");
+    expect(groups()).toEqual(["Planejamento", "Execução", "Sem fase definida"]);
+    expect(within(board()).getAllByRole("columnheader", { name: "Situação" })).toHaveLength(3);
+    expect(within(screen.getByRole("table", { name: "Execução" })).getByRole("cell", { name: "Atrasado" })).toBeInTheDocument();
   });
 
   it("filtra pelo campo livre", async () => {
@@ -96,6 +114,6 @@ describe("Panorama", () => {
     await user.selectOptions(screen.getByLabelText("Filtrar por campo"), "Diretoria");
     await user.selectOptions(screen.getByLabelText("Valor de Diretoria"), "DIRAU");
     expect(screen.getByText("1 projeto de 3 no recorte")).toBeInTheDocument();
-    expect(screen.getByText("Tarefas bloqueadas").parentElement).toHaveTextContent("1");
+    expect(listed()).toEqual(["Portal"]);
   });
 });

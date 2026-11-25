@@ -9,22 +9,23 @@ import { api } from "../../services/api";
 export function ProjectDetails({ project, canManage }: { project: Project; canManage: boolean }) {
   const [editing, setEditing] = useState(false);
   return (
-    <section className="card" style={{ gridColumn: "1 / -1" }}>
-      <div className="row">
-        <h2 className="grow">Sobre o projeto</h2>
+    <section className="card pane pv-about">
+      <div className="card-head">
+        <h2>Sobre o projeto</h2>
         {canManage && <button className="btn btn-line btn-sm" onClick={() => setEditing(true)}>Editar informações</button>}
       </div>
-      {project.description.length > 600 ? (
-        <details style={{ marginTop: 12 }}><summary style={{ cursor: "pointer" }}>Ler descrição completa</summary><p className="muted" style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere", marginTop: 12 }}>{project.description}</p></details>
-      ) : <p className="muted" style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere", marginTop: 12 }}>{project.description || "Nenhuma descrição detalhada cadastrada."}</p>}
-      <dl className="grid" style={{ marginTop: 20 }}>
-        {([["Responsável", project.responsible], ["Demandante / relator", project.requester], ["Referência de origem", project.external_ref]] as const).map(([label, value]) => (
-          <div key={label}><dt className="coord">{label}</dt><dd style={{ margin: "6px 0", overflowWrap: "anywhere" }}>{value || "Não informado"}</dd></div>
-        ))}
-        {(project.attributes ?? []).map((a) => (
-          <div key={a.name}><dt className="coord">{a.name}</dt><dd style={{ margin: "6px 0", overflowWrap: "anywhere" }}>{a.value}</dd></div>
-        ))}
-      </dl>
+      {/* A ficha rola por dentro: descrição longa não empurra os outros cartões para baixo da tela. */}
+      <div className="pane-body">
+        <p className="muted" style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{project.description || "Nenhuma descrição detalhada cadastrada."}</p>
+        <dl className="pv-facts">
+          {([["Responsável", project.responsible], ["Demandante / relator", project.requester], ["Referência de origem", project.external_ref]] as const).map(([label, value]) => (
+            <div key={label}><dt className="coord">{label}</dt><dd>{value || "Não informado"}</dd></div>
+          ))}
+          {(project.attributes ?? []).map((a) => (
+            <div key={a.name}><dt className="coord">{a.name}</dt><dd>{a.value}</dd></div>
+          ))}
+        </dl>
+      </div>
       {editing && <EditDetails project={project} onClose={() => setEditing(false)} />}
     </section>
   );

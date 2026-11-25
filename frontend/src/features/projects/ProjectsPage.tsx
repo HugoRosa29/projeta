@@ -59,6 +59,7 @@ export function ProjectsPage() {
               <div className="row">
                 <h2 style={{ flex: 1 }}>{p.name}</h2>
                 {p.status === "archived" && <span className="badge">Arquivado</span>}
+                {p.shared_from && <span className="badge" title="Compartilhado no organograma: só leitura">de {p.shared_from}</span>}
               </div>
               {p.summary && <p className="muted">{p.summary}</p>}
               {p.responsible && <span className="coord">Responsável: {p.responsible}</span>}

@@ -2,7 +2,14 @@ from psycopg.types.json import Jsonb
 
 from ..db import Ctx
 from ..errors import BadRequestError, ForbiddenError
-from ..identity.access import VISIBLE_PROJECT, membership, project_access, role_in
+from ..identity.access import (
+    IN_WORKSPACE_OR_RECEIVED,
+    SHARED_FROM,
+    VISIBLE_PROJECT,
+    membership,
+    project_access,
+    role_in,
+)
 from ..identity.policy import assert_can
 from .activity import log_activity
 from .formal import PHASES
@@ -130,8 +137,9 @@ def list_projects(ctx: Ctx, workspace_id: str, include_archived: bool = False) -
           (SELECT count(*)::int FROM tasks t WHERE t.project_id = p.id) AS task_count,
           (SELECT count(*)::int FROM tasks t WHERE t.project_id = p.id AND t.status = 'done') AS done_count,
           (SELECT max(a.created_at) FROM activity a WHERE a.project_id = p.id) AS last_activity,
-          (SELECT c.updated_at FROM project_covers c WHERE c.project_id = p.id) AS cover_version
-        FROM projects p WHERE p.workspace_id = %(ws)s AND {VISIBLE_PROJECT}
+          (SELECT c.updated_at FROM project_covers c WHERE c.project_id = p.id) AS cover_version,
+          {SHARED_FROM}
+        FROM projects p WHERE {IN_WORKSPACE_OR_RECEIVED} AND {VISIBLE_PROJECT}
         {"" if include_archived else "AND p.status = 'active'"} ORDER BY p.status, p.name""",
         {"ws": workspace_id, "uid": ctx.user_id},
     )

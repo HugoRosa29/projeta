@@ -11,7 +11,7 @@ from fastapi.responses import JSONResponse
 from .. import db
 from ..errors import AppError
 from .deps import CSRF_HEADER, CSRF_VALUE
-from .routes import assistant, auth, projects, tasks, today, workspaces
+from .routes import assistant, auth, okrs, projects, sprints, tasks, today, workspaces
 
 logger = logging.getLogger("projeta")
 SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
@@ -59,7 +59,7 @@ def create_app() -> FastAPI:
     def health() -> dict:
         return {"status": "ok"}
 
-    for r in (auth, workspaces, projects, tasks, today, assistant):
+    for r in (auth, workspaces, projects, tasks, sprints, today, okrs, assistant):
         app.include_router(r.router, prefix="/api/v1")
     return app
 

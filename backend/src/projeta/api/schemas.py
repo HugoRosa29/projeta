@@ -3,7 +3,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 Status = Literal["todo", "doing", "blocked", "done"]
-Priority = Literal["low", "medium", "high"]
+Priority = Literal["low", "medium", "high", "urgent"]
 RoleName = Literal["admin", "manager", "member", "viewer"]
 
 
@@ -97,12 +97,14 @@ class TaskCreate(BaseModel):
     status: Status | None = None
     priority: Priority | None = None
     assignee_id: str | None = None
+    start_date: str | None = None
     due_date: str | None = None
     estimate_minutes: int | None = None
     phase: str | None = None
     is_milestone: bool | None = None
     labels: list[str] | None = None
     parent_id: str | None = None
+    sprint_id: str | None = None
 
 
 class TaskPatch(BaseModel):
@@ -111,6 +113,7 @@ class TaskPatch(BaseModel):
     status: Status | None = None
     priority: Priority | None = None
     assignee_id: str | None = None
+    start_date: str | None = None
     due_date: str | None = None
     estimate_minutes: int | None = None
     progress: int | None = None
@@ -119,6 +122,7 @@ class TaskPatch(BaseModel):
     labels: list[str] | None = None
     position: float | None = None
     parent_id: str | None = None
+    sprint_id: str | None = None
     expected_version: int | None = None
 
 
@@ -153,3 +157,64 @@ class TermIn(BaseModel):
 
 class PermissionsIn(BaseModel):
     permissions: dict[str, list[str]]
+
+
+class ShareIn(BaseModel):
+    project_id: str = Field(max_length=64)
+
+
+class DirectShareIn(BaseModel):
+    project_id: str = Field(max_length=64)
+    unit: str = Field(min_length=1, max_length=40)
+
+
+Confidence = Literal["on_track", "at_risk", "off_track"]
+
+
+class ObjectiveIn(BaseModel):
+    workspace_id: str = Field(max_length=64)
+    title: str = Field(max_length=400)
+    period: str = Field(max_length=10)
+    description: str = Field(default="", max_length=4000)
+    owner_id: str | None = Field(default=None, max_length=64)
+
+
+class ObjectivePatch(BaseModel):
+    title: str | None = Field(default=None, max_length=400)
+    period: str | None = Field(default=None, max_length=10)
+    description: str | None = Field(default=None, max_length=4000)
+    owner_id: str | None = Field(default=None, max_length=64)
+
+
+class KeyResultIn(BaseModel):
+    title: str | None = Field(default=None, max_length=400)
+    owner_id: str | None = Field(default=None, max_length=64)
+    kind: Literal["number", "project"] | None = None
+    start_value: float | None = None
+    target_value: float | None = None
+    unit: str | None = Field(default=None, max_length=40)
+    project_id: str | None = Field(default=None, max_length=64)
+    objective_id: str | None = Field(default=None, max_length=64)
+    cost: float | None = None
+
+
+class CheckInIn(BaseModel):
+    value: float | None = None
+    confidence: Confidence
+    note: str = Field(default="", max_length=4000)
+
+
+class SprintIn(BaseModel):
+    name: str | None = Field(default=None, max_length=200)
+    goal: str | None = Field(default=None, max_length=2000)
+    start_date: str | None = Field(default=None, max_length=10)
+    end_date: str | None = Field(default=None, max_length=10)
+    capacity_minutes: int | None = None
+
+
+class SprintPatch(SprintIn):
+    expected_version: int | None = None
+
+
+class SprintCloseIn(BaseModel):
+    carry_to: Literal["next", "backlog"]

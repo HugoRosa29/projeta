@@ -6,27 +6,53 @@ import { TaskDialog, TaskTags } from "../features/tasks/TaskParts";
 import { api } from "../services/api";
 
 const task = { id: "t1", title: "Entrega", priority: "medium", labels: ["EXISTENTE"], status: "todo", version: 3, description: "", project_id: null, due_date: null };
+const client = () => new QueryClient({ defaultOptions: { queries: { retry: false } } });
 afterEach(() => vi.restoreAllMocks());
-it("exibe prioridade e tags em conjunto", () => {
-  render(<TaskTags task={{ priority: "high", labels: ["URGENTE", "REVISÃO"] }} />);
-  expect(screen.getByLabelText("Prioridade: Alta")).toHaveTextContent("ALTA");
-  expect(screen.getByText("URGENTE")).toHaveClass("task-tag-urgent");
+
+it("exibe prioridade e tags em conjunto, com urgente em destaque", () => {
+  render(<TaskTags task={{ priority: "urgent", labels: ["REVISÃO"] }} />);
+  expect(screen.getByLabelText("Prioridade: Urgente")).toHaveTextContent("URGENTE");
+  expect(screen.getByLabelText("Prioridade: Urgente")).toHaveClass("priority-tag-urgent");
   expect(screen.getByText("REVISÃO")).toBeInTheDocument();
 });
-it("salva urgência e tags sem apagar etiquetas anteriores", async () => {
-  vi.spyOn(api, "get").mockResolvedValue({ task, can_write: true, depends_on: [] });
+
+it("salva prioridade urgente e tags sem apagar etiquetas anteriores", async () => {
+  vi.spyOn(api, "get").mockResolvedValue({ task, can_write: true, depends_on: [], blocks: [] });
   const patch = vi.spyOn(api, "patch").mockResolvedValue(task);
-  render(<QueryClientProvider client={new QueryClient()}><TaskDialog taskId="t1" onClose={() => {}} /></QueryClientProvider>);
+  render(<QueryClientProvider client={client()}><TaskDialog taskId="t1" onClose={() => {}} /></QueryClientProvider>);
   const user = userEvent.setup();
-  await user.click(await screen.findByRole("button", { name: "URGENTE" }));
+  await user.selectOptions(await screen.findByLabelText("Prioridade"), "urgent");
   await user.type(screen.getByLabelText("Tags"), ", revisão, revisão");
   await user.click(screen.getByRole("button", { name: "Salvar" }));
-  expect(patch).toHaveBeenCalledWith("/tasks/t1", { expected_version: 3, labels: ["EXISTENTE", "URGENTE", "REVISÃO"] });
+  expect(patch).toHaveBeenCalledWith("/tasks/t1", { expected_version: 3, priority: "urgent", labels: ["EXISTENTE", "REVISÃO"] });
 });
+
 it("impede edição das etiquetas para acesso somente leitura", async () => {
-  vi.spyOn(api, "get").mockResolvedValue({ task, can_write: false, depends_on: [] });
-  render(<QueryClientProvider client={new QueryClient()}><TaskDialog taskId="t1" onClose={() => {}} /></QueryClientProvider>);
+  vi.spyOn(api, "get").mockResolvedValue({ task, can_write: false, depends_on: [], blocks: [] });
+  render(<QueryClientProvider client={client()}><TaskDialog taskId="t1" onClose={() => {}} /></QueryClientProvider>);
   expect(await screen.findByLabelText("Tags")).toBeDisabled();
-  expect(screen.getByRole("button", { name: "URGENTE" })).toBeDisabled();
   expect(screen.getByLabelText("Prioridade")).toBeDisabled();
+});
+
+it("tarefa de projeto escolhe a sprint; encerradas não aparecem como destino", async () => {
+  const projTask = { ...task, project_id: "p1", sprint_id: null };
+  vi.spyOn(api, "get").mockImplementation((path: string) =>
+    Promise.resolve(
+      path === "/projects/p1/sprints"
+        ? { sprints: [
+            { id: "s1", name: "Sprint 1", status: "closed" },
+            { id: "s2", name: "Sprint 2", status: "active" },
+          ] }
+        : { task: projTask, can_write: true, depends_on: [], blocks: [] },
+    ) as never,
+  );
+  const patch = vi.spyOn(api, "patch").mockResolvedValue(projTask);
+  render(<QueryClientProvider client={client()}><TaskDialog taskId="t1" members={[]} onClose={() => {}} /></QueryClientProvider>);
+  const user = userEvent.setup();
+  const select = await screen.findByLabelText("Sprint");
+  await screen.findByRole("option", { name: "Sprint 2 (em andamento)" });
+  expect(screen.queryByRole("option", { name: /Sprint 1/ })).not.toBeInTheDocument();
+  await user.selectOptions(select, "s2");
+  await user.click(screen.getByRole("button", { name: "Salvar" }));
+  expect(patch).toHaveBeenCalledWith("/tasks/t1", { expected_version: 3, sprint_id: "s2" });
 });

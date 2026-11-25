@@ -13,7 +13,7 @@ from datetime import date, timedelta
 from projeta import db
 from projeta.db import uow
 from projeta.identity import auth, workspaces
-from projeta.work import projects, tasks
+from projeta.work import okrs, projects, tasks
 
 NOBODY = "00000000-0000-0000-0000-000000000000"
 
@@ -121,6 +121,49 @@ def main() -> None:
             "UPDATE activity SET created_at = now() - interval '25 days' WHERE project_id = %s",
             (old,),
         )
+
+        # OKRs do trimestre: Ana gere, Bruno é dono de KRs (um em dia, um pedindo check-in).
+        period = okrs.quarter_of(date.today())
+        o1 = okrs.create_objective(
+            ctx, ws, "Entregar presença digital que encante o cliente", period, owner_id=ana["id"]
+        )["id"]
+        k1 = okrs.create_key_result(
+            ctx,
+            o1,
+            {
+                "title": "Site institucional no ar",
+                "kind": "project",
+                "project_id": site,
+                "owner_id": ana["id"],
+            },
+        )["id"]
+        k2 = okrs.create_key_result(
+            ctx,
+            o1,
+            {
+                "title": "Reduzir o tempo de carregamento da home",
+                "start_value": 6,
+                "target_value": 2,
+                "unit": "s",
+                "owner_id": bruno["id"],
+            },
+        )["id"]
+        o2 = okrs.create_objective(
+            ctx, ws, "Aposentar o portal legado sem perder audiência", period
+        )["id"]
+        okrs.create_key_result(
+            ctx,
+            o2,
+            {
+                "title": "Páginas migradas",
+                "start_value": 0,
+                "target_value": 120,
+                "unit": "páginas",
+                "owner_id": bruno["id"],
+            },
+        )
+        okrs.check_in(ctx, k1, None, "at_risk", "Aprovação do cliente travando os templates.")
+        okrs.check_in(ctx, k2, 4.5, "on_track", "Imagens otimizadas.")
     print(
         "Demonstração criada. O login é pelo GIA: para ver estes dados, rode o seed com "
         "--matricula <sua matrícula> (--reset recria)."

@@ -4,6 +4,7 @@ import { ApiError } from "../services/api";
 import { AgendaPage } from "../features/agenda/AgendaPage";
 import { InvitePage } from "../features/auth/InvitePage";
 import { LoginPage } from "../features/auth/AuthPages";
+import { OkrPage } from "../features/okrs/OkrPage";
 import { PortfolioPage } from "../features/portfolio/PortfolioPage";
 import { ProjectPage } from "../features/projects/ProjectPage";
 import { ProjectsPage } from "../features/projects/ProjectsPage";
@@ -35,6 +36,7 @@ function Protected() {
             <Route path="projetos" element={<ProjectsPage />} />
             <Route path="projetos/:id" element={<ProjectPage />} />
             <Route path="portfolio" element={<PortfolioPage />} />
+            <Route path="metas" element={<OkrPage />} />
             <Route path="minhas-tarefas" element={<MyTasksPage />} />
             <Route path="agenda" element={<AgendaPage />} />
             <Route path="configuracoes" element={<SettingsPage />} />
