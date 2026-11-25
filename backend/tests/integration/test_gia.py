@@ -31,7 +31,7 @@ def meus_espacos(c: TestClient) -> list[dict]:
 
 
 def test_primeira_entrada_cria_conta_espaco_pessoal_e_espaco_da_lotacao(gia):
-    gia.add("a123", name="Ana Souza", email="Ana@Terracap.df.gov.br", allotment="  GETIN  ")
+    gia.add("a123", name="Ana Souza", email="Ana@Terracap.df.gov.br", sg_lotacao="  GETIN  ")
     c = entrar("a123")
     assert c.last.status_code == 200
     user = c.last.json()["user"]
@@ -53,9 +53,9 @@ def test_chamada_ao_gia_usa_servico_sistema_e_matricula_em_maiusculas(gia):
 
 
 def test_mesma_lotacao_compartilha_o_espaco_e_outra_lotacao_fica_de_fora(gia):
-    gia.add("a1", name="Ana", allotment="GETIN")
-    gia.add("b2", name="Bia", allotment="getin")  # caixa diferente = mesma lotação
-    gia.add("c3", name="Caio", allotment="ASCOM")
+    gia.add("a1", name="Ana", sg_lotacao="GETIN")
+    gia.add("b2", name="Bia", sg_lotacao="getin")  # caixa diferente = mesma lotação
+    gia.add("c3", name="Caio", sg_lotacao="ASCOM")
     ana, bia = entrar("a1"), entrar("b2")
     entrar("c3")
     ws_ana = next(w["id"] for w in meus_espacos(ana) if w["kind"] == "team")
@@ -78,9 +78,9 @@ def test_mesma_lotacao_compartilha_o_espaco_e_outra_lotacao_fica_de_fora(gia):
 
 
 def test_nova_entrada_atualiza_perfil_sem_duplicar_e_mudar_de_lotacao_entra_no_novo_espaco(gia):
-    gia.add("a1", name="Ana", allotment="GETIN")
+    gia.add("a1", name="Ana", sg_lotacao="GETIN")
     entrar("a1")
-    gia.add("a1", name="Ana Maria Souza", allotment="ASCOM")
+    gia.add("a1", name="Ana Maria Souza", sg_lotacao="ASCOM")
     c = entrar("a1")
     assert c.last.json()["user"]["name"] == "Ana Maria Souza"
     assert {w["name"] for w in meus_espacos(c) if w["kind"] == "team"} == {"GETIN", "ASCOM"}
@@ -190,3 +190,21 @@ def test_conta_do_gia_nao_tem_senha_local(gia):
     r = c.post("/api/v1/auth/login-local", json={"email": "ana@x.com", "password": "senha-gia"})
     assert r.status_code == 401
     assert cadastrar(c, email="ana@x.com").status_code == 409
+
+
+def test_sg_lotacao_do_gia_leva_ao_espaco_da_unidade_e_titular_vira_gestor(gia):
+    # Formato de produção: só a sigla, em `sg_lotacao`.
+    gia.add("d1", name="Daniel Reis Santos", sg_lotacao="DIRAU")
+    gia.add("d2", name="Outra Pessoa", sg_lotacao="DIRAU")
+    titular, lotado = entrar("d1"), entrar("d2")
+    unidade = {(w["name"], w["role"]) for w in meus_espacos(titular) if w["kind"] == "team"}
+    assert unidade == {("DIRAU", "admin")}
+    unidade = {(w["name"], w["role"]) for w in meus_espacos(lotado) if w["kind"] == "team"}
+    assert unidade == {("DIRAU", "manager")}
+    perfil = titular.get("/api/v1/me/profile").json()
+    assert perfil["allotment"] == "DIRAU" and perfil["unit"]["sigla"] == "DIRAU"
+
+
+def test_chave_allotment_continua_aceita_quando_nao_ha_sg_lotacao(gia):
+    gia.add("a1", name="Ana", allotment="GETIN")
+    assert {w["name"] for w in meus_espacos(entrar("a1")) if w["kind"] == "team"} == {"GETIN"}
