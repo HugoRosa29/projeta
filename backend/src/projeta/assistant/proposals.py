@@ -21,7 +21,9 @@ from ..identity.policy import assert_can
 from ..settings import get_settings
 from ..work import comments, formal, projects, tasks
 from ..work.today import today_in
+from . import actions
 from .payloads import (
+    ActionsPayload,
     CommentPayload,
     CreateTasksPayload,
     StatusNotePayload,
@@ -148,8 +150,21 @@ def _comment_preview(ctx: Ctx, p: CommentPayload) -> tuple[dict, dict]:
 LIVE_PREVIEW = ("update_task", "add_comment")
 
 
+def _steps(model: ActionsPayload) -> list[dict]:
+    return [st.model_dump() for st in model.steps]
+
+
+def _user_tz(ctx: Ctx) -> str:
+    row = ctx.one("SELECT timezone FROM users WHERE id=%s", (ctx.user_id,))
+    return row["timezone"] if row else "America/Sao_Paulo"
+
+
 def _preview(ctx: Ctx, kind: str, model: Any) -> tuple[dict, dict]:
     """(prévia legível, versões-base dos registros afetados)."""
+    if kind == "actions":
+        # A prévia das ações é calculada em `view` (precisa do espaço); versões viajam nos
+        # próprios parâmetros (expected_version) e o serviço confere na execução.
+        return {}, {}
     if kind == "update_task":
         return _update_preview(ctx, model)
     if kind == "add_comment":
@@ -168,7 +183,10 @@ def _preview(ctx: Ctx, kind: str, model: Any) -> tuple[dict, dict]:
 
 def _authorize_target(ctx: Ctx, kind: str, model: Any, workspace_id: str) -> None:
     """Falha cedo (na proposta) se o usuário não poderia executar — a confirmação revalida de novo."""
-    if kind == "create_tasks":
+    if kind == "actions":
+        # Simula o plano inteiro: o serviço de cada passo decide permissão e regras.
+        actions.dry_run(ctx, workspace_id, _user_tz(ctx), _steps(model))
+    elif kind == "create_tasks":
         if model.project_id:
             if not project_access(ctx, model.project_id).can_write:
                 raise ForbiddenError()
@@ -194,7 +212,9 @@ def _authorize_target(ctx: Ctx, kind: str, model: Any, workspace_id: str) -> Non
 def view(ctx: Ctx, row: dict) -> dict:
     model = parse_payload(row["kind"], row["payload"])
     preview: dict
-    if row["kind"] in LIVE_PREVIEW and row["status"] == "pending":
+    if row["kind"] == "actions":
+        preview = actions.preview(ctx, row["workspace_id"], _steps(model))
+    elif row["kind"] in LIVE_PREVIEW and row["status"] == "pending":
         try:
             preview, _ = _preview(ctx, row["kind"], model)
         except ForbiddenError:
@@ -380,6 +400,11 @@ def _exec_status_note(ctx: Ctx, m: StatusNotePayload) -> dict:
 
 
 def _message(kind: str, result: dict) -> str:
+    if kind == "actions":
+        done = result.get("done") or []
+        if len(done) == 1:
+            return f"Pronto: {done[0]['label'][:1].lower()}{done[0]['label'][1:]}."
+        return f"Pronto: executei as {len(done)} ações do plano."
     if kind == "status_note":
         return (
             f"Pronto: publiquei a nota de acompanhamento do projeto “{result['project']['name']}”."
@@ -426,7 +451,13 @@ def confirm_proposal(ctx: Ctx, proposal_id: str) -> dict:
             return {"status": "stale", "proposal": view(ctx, fresh)}
 
     ws = row["workspace_id"]
-    if row["kind"] == "create_tasks":
+    once: list[dict] = []
+    if row["kind"] == "actions":
+        executed = actions.execute(ctx, ws, _user_tz(ctx), _steps(model))  # type: ignore[arg-type]
+        # Segredos (link de convite) só na resposta desta confirmação, nunca no histórico.
+        once = [d.pop("once") for d in executed if "once" in d]
+        result = {"done": executed}
+    elif row["kind"] == "create_tasks":
         result = _exec_create_tasks(ctx, ws, model)  # type: ignore[arg-type]
     elif row["kind"] == "apply_wbs":
         result = _exec_wbs(ctx, ws, model)  # type: ignore[arg-type]
@@ -447,10 +478,17 @@ def confirm_proposal(ctx: Ctx, proposal_id: str) -> dict:
         "INSERT INTO assistant_messages(conversation_id, role, content, links) VALUES (%s,'assistant',%s,%s)",
         (row["conversation_id"], msg, Jsonb(_links_from(result))),
     )
-    return {"status": "confirmed", "proposal": view(ctx, done), "message": msg}
+    out = {"status": "confirmed", "proposal": view(ctx, done), "message": msg}
+    if once:
+        out["once"] = once
+    return out
 
 
 def _links_from(result: dict) -> list[dict]:
+    if "done" in result:
+        return [
+            {"label": d["label"], "href": d["href"]} for d in result["done"] if d.get("href")
+        ][:10]
     if "project" in result:
         return [{"label": result["project"]["name"], "href": result["project"]["href"]}]
     return [

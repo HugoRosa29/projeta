@@ -8,6 +8,7 @@ from typing import Literal
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from ..errors import BadRequestError
+from . import actions
 
 MAX_PHASES = 12
 MAX_WBS_TASKS = 80
@@ -165,7 +166,28 @@ class StatusNotePayload(BaseModel):
         return self
 
 
+class ActionStep(BaseModel):
+    action: str
+    params: dict = Field(default_factory=dict)
+
+
+class ActionsPayload(BaseModel):
+    """Plano de ações genéricas (ver `actions.py`): executado inteiro numa transação, ou nada."""
+
+    steps: list[ActionStep] = Field(min_length=1, max_length=actions.MAX_STEPS)
+
+    @model_validator(mode="after")
+    def _valid_steps(self) -> ActionsPayload:
+        for i, st in enumerate(self.steps, 1):
+            try:
+                st.params = actions.normalize(st.action, st.params)
+            except ValueError as e:
+                raise ValueError(f"passo {i}: {e}") from e
+        return self
+
+
 MODELS: dict[str, type[BaseModel]] = {
+    "actions": ActionsPayload,
     "create_tasks": CreateTasksPayload,
     "apply_wbs": WbsPayload,
     "update_task": UpdatePayload,
