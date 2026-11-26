@@ -1278,6 +1278,8 @@ def _shape(annotation: Any, metadata: list | None = None) -> tuple[str, Any]:
         return "bool", None
     if annotation in (int, float):
         return "number", None
+    if isinstance(annotation, type) and issubclass(annotation, BaseModel):
+        return "model", list(annotation.model_fields)
     if annotation is str:
         return "str", next((m.max_length for m in meta if getattr(m, "max_length", None)), None)
     return "other", None
@@ -1398,6 +1400,8 @@ def _hint(field: Any) -> str:
         if kind == "list":
             inner = text(extra)
             return f"lista[{inner}]" if inner else "lista"
+        if kind == "model":
+            return "{" + ", ".join(extra) + "}"
         return {"date": "AAAA-MM-DD", "bool": "bool", "number": "número", "dict": "objeto"}.get(
             kind, ""
         )
