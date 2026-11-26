@@ -27,8 +27,8 @@ from ..errors import BadRequestError
 from ..identity.access import is_uuid, membership
 from ..identity.policy import CONFIGURABLE_ROLES, PERMISSIONS, ROLES, assert_can
 from ..identity.workspaces import create_team_workspace
+from . import baselines, covers, phases
 from . import comments as comments_svc
-from . import covers
 from .activity import log_activity
 from .formal import PHASES, TAP_FIELDS, TEP_FIELDS
 from .projects import clean_attributes
@@ -835,6 +835,10 @@ def import_workspace(
                 "ON CONFLICT DO NOTHING",
                 (tid[t.ref], tid[d]),
             )
+    # Cada projeto importado nasce com a linha de base inicial (datas como vieram no arquivo).
+    for project_id in pid.values():
+        baselines.create_initial(ctx, project_id)
+        phases.register_from_tasks(ctx, project_id)  # as fases das tarefas viram a lista do projeto
 
     for a in f.activity:
         if a.kind.startswith("workspace."):

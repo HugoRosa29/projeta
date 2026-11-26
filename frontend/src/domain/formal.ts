@@ -11,6 +11,9 @@ export interface PortfolioRow {
   workspace_id?: string;
   /** Espaço de origem quando o projeto veio de uma unidade abaixo no organograma. */
   shared_from?: string | null;
+  /** Unidade filha direta do espaço pela qual o projeto chegou (na COINT, COTIN para um projeto
+   *  da DISID). Nula para projeto próprio ou compartilhamento direto de fora da linha. */
+  via_unit?: { sigla: string; label: string } | null;
   name: string;
   phase: Phase | null;
   approach: string | null;
@@ -33,6 +36,8 @@ export interface PortfolioRow {
   tap_start?: string | null;
   tap_end?: string | null;
   created_on?: string | null;
+  /** Pasta do projeto no espaço dono; sempre nula para projeto recebido pelo organograma. */
+  folder_id?: string | null;
 }
 
 export const PHASE_LABEL: Record<Phase, string> = {

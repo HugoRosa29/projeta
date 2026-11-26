@@ -1,7 +1,9 @@
 from fastapi import APIRouter, Cookie, Depends, Request, Response
+from starlette.concurrency import run_in_threadpool
 
 from ...db import uow
-from ...identity import auth, workspaces
+from ...errors import BadRequestError
+from ...identity import auth, photos, workspaces
 from ...settings import get_settings
 from ..deps import COOKIE, NOBODY, current_user
 from ..schemas import AcceptIn, LocalLoginIn, LoginIn, RegisterIn, TimezoneIn
@@ -73,6 +75,40 @@ def my_profile(user: dict = Depends(current_user)) -> dict:
 def my_timezone(body: TimezoneIn, user: dict = Depends(current_user)) -> None:
     with uow(user["id"]) as ctx:
         workspaces.update_my_timezone(ctx, body.timezone)
+
+
+@router.put("/me/photo")
+async def put_my_photo(request: Request, user: dict = Depends(current_user)) -> dict:
+    # Corpo é a imagem crua (sem multipart). Recusa antes de ler tudo quando já declara ser grande.
+    declared = request.headers.get("content-length")
+    if declared and declared.isdigit() and int(declared) > photos.MAX_BYTES + 1024:
+        raise BadRequestError("A foto passa de 1 MB. Escolha uma menor ou reduza o tamanho dela.")
+    data = await request.body()
+
+    def run() -> dict:
+        with uow(user["id"]) as ctx:
+            return photos.set_my_photo(ctx, data)
+
+    return await run_in_threadpool(run)
+
+
+@router.get("/me/photo")
+def get_my_photo(user: dict = Depends(current_user)) -> Response:
+    with uow(user["id"]) as ctx:
+        p = photos.get_my_photo(ctx)
+    if not p:
+        return Response(status_code=404)
+    return Response(
+        content=bytes(p["data"]),
+        media_type=p["content_type"],
+        headers={"Cache-Control": "private, max-age=3600", "X-Content-Type-Options": "nosniff"},
+    )
+
+
+@router.delete("/me/photo", status_code=204)
+def delete_my_photo(user: dict = Depends(current_user)) -> None:
+    with uow(user["id"]) as ctx:
+        photos.delete_my_photo(ctx)
 
 
 @router.post("/invitations/accept")

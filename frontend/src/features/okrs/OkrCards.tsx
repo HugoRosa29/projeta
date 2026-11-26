@@ -3,7 +3,7 @@ import { Flame, Target } from "lucide-react";
 import { useState } from "react";
 import { Link } from "react-router";
 import { ErrorBox } from "../../components/ui";
-import { CONFIDENCES, CONFIDENCE_LABEL, CONFIDENCE_TONE, periodLabel, staleByOwner, type KeyResult, type MyOkrs, type OkrBoard } from "../../domain/okr";
+import { CONFIDENCES, CONFIDENCE_LABEL, CONFIDENCE_TONE, mergeSummaries, periodLabel, staleByOwner, type KeyResult, type MyOkrs, type OkrBoard } from "../../domain/okr";
 import { api } from "../../services/api";
 import { CheckinDialog } from "./CheckinDialog";
 import { KrRow, ProgressBar } from "./OkrParts";
@@ -62,13 +62,18 @@ export function MyCheckins({ workspaceId, always = false }: { workspaceId: strin
   );
 }
 
-/** Resumo para quem gere, na home: andamento do trimestre e quem precisa atualizar. */
+/**
+ * Resumo para quem gere, na home: andamento do trimestre e quem precisa atualizar. Soma os
+ * objetivos próprios e os recebidos das unidades abaixo num panorama só; a separação por origem
+ * (e o repasse) fica no painel de OKRs.
+ */
 export function OkrPulse({ workspaceId, suggest = true }: { workspaceId: string; /** Sem objetivos, convida a definir (não no espaço pessoal). */ suggest?: boolean }) {
   const q = useQuery({ queryKey: ["okrs", "board", workspaceId, ""], queryFn: () => api.get<OkrBoard>("/okrs", { workspace_id: workspaceId }) });
   if (q.isError) return <ErrorBox error={q.error} onRetry={() => q.refetch()} />;
   const d = q.data;
   if (!d) return null;
-  const s = d.summary;
+  const objectives = [...d.objectives, ...d.received.objectives];
+  const s = mergeSummaries(objectives, d.summary, d.received.summary);
   if (!s.objectives) {
     if (!d.can_manage || !suggest) return null;
     return (
@@ -79,7 +84,7 @@ export function OkrPulse({ workspaceId, suggest = true }: { workspaceId: string;
       </section>
     );
   }
-  const stale = staleByOwner(d.objectives);
+  const stale = staleByOwner(objectives);
   return (
     <section className="card okr-pulse" aria-labelledby="okr-pulse-title">
       <div className="card-head">

@@ -45,6 +45,8 @@ export interface Objective {
   progress: number;
   confidence: Confidence | null;
   key_results: KeyResult[];
+  /** Espaço de origem quando o objetivo veio de uma unidade abaixo no organograma (só leitura). */
+  shared_from?: string;
 }
 export interface OkrBoard {
   period: string;
@@ -64,6 +66,8 @@ export interface OkrBoard {
     without_owner: number;
     cost: number;
   };
+  /** Objetivos compartilhados pelas unidades abaixo no organograma, só leitura. */
+  received: { objectives: Objective[]; summary: OkrBoard["summary"] };
 }
 export interface MyOkrs {
   period: string;
@@ -151,6 +155,25 @@ export function staleByOwner(objectives: Objective[]): { owner: string; items: K
         map.set(owner, [...(map.get(owner) ?? []), k]);
       }
   return [...map.entries()].map(([owner, items]) => ({ owner, items })).sort((a, b) => b.items.length - a.items.length || a.owner.localeCompare(b.owner));
+}
+
+/**
+ * Junta os resumos dos objetivos próprios e dos recebidos num panorama só. As contagens somam;
+ * o progresso é a média dos objetivos, como o servidor calcula cada resumo (work/okrs.py).
+ */
+export function mergeSummaries(objectives: Objective[], ...parts: OkrBoard["summary"][]): OkrBoard["summary"] {
+  const sum = (f: (p: OkrBoard["summary"]) => number) => parts.reduce((n, p) => n + f(p), 0);
+  return {
+    objectives: objectives.length,
+    key_results: sum((p) => p.key_results),
+    progress: objectives.length ? Math.round(objectives.reduce((n, o) => n + o.progress, 0) / objectives.length) : 0,
+    confidence: { on_track: sum((p) => p.confidence.on_track), at_risk: sum((p) => p.confidence.at_risk), off_track: sum((p) => p.confidence.off_track) },
+    stale: sum((p) => p.stale),
+    behind_pace: sum((p) => p.behind_pace),
+    updated_this_week: sum((p) => p.updated_this_week),
+    without_owner: sum((p) => p.without_owner),
+    cost: sum((p) => p.cost),
+  };
 }
 
 /** Quem vê a home como gestão (painéis) e quem vê como execução (o próprio trabalho primeiro). */

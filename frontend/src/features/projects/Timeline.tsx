@@ -1,9 +1,12 @@
-import { ArrowRight, ChevronDown, ChevronLeft, ChevronRight, ChevronsDownUp, ChevronsUpDown, Link2, Maximize2, Minimize2, TriangleAlert, X } from "lucide-react";
-import { useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { ArrowRight, ChevronDown, ChevronLeft, ChevronRight, ChevronsDownUp, ChevronsUpDown, Layers, Link2, Maximize2, Minimize2, Settings2, TriangleAlert, X } from "lucide-react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { Empty, useToast } from "../../components/ui";
+import { baselineLabel, compareBaseline, deltaLabel, deltaText, plannedStart, type BaselineTask, type Missing } from "../../domain/baseline";
 import { STATUS_LABEL, fmtDate, type Task } from "../../domain/types";
 import { dependencyCandidates, localToday, scheduleConflicts } from "../../domain/work";
 import { useDependency } from "../tasks/hooks";
+import { BaselineDialog, useBaseline, useBaselines } from "./Baselines";
+import { usePhases } from "./phases";
 
 /** Alturas fixas: as setas entre barras são calculadas a partir delas. */
 const ROW = 28;
@@ -22,7 +25,32 @@ const ZOOMS = [
 ] as const;
 type Zoom = (typeof ZOOMS)[number][0];
 
-type Item = { kind: "phase"; key: string; name: string; from: string; to: string } | { kind: "task"; key: string; task: Task };
+type Item =
+  | { kind: "phase"; key: string; name: string; from: string; to: string; base?: { from: string; to: string } }
+  | { kind: "task"; key: string; task: Task }
+  | { kind: "missing"; key: string; item: Missing };
+
+/** Filtro da comparação: só as tarefas daquele grupo aparecem. */
+type BaseFilter = "late" | "early" | "added" | "missing";
+
+/** Linha de base escolhida no projeto, lembrada neste navegador ("off" = sem comparação). */
+const baseKey = (projectId: string) => `projeta-baseline:${projectId}`;
+function readBase(projectId?: string): string | null {
+  if (!projectId) return null;
+  try {
+    return localStorage.getItem(baseKey(projectId));
+  } catch {
+    return null;
+  }
+}
+function writeBase(projectId: string | undefined, v: string) {
+  if (!projectId) return;
+  try {
+    localStorage.setItem(baseKey(projectId), v);
+  } catch {
+    /* armazenamento indisponível: a escolha vale só nesta visita */
+  }
+}
 
 const ms = (d: string) => new Date(`${d}T00:00:00Z`).getTime();
 const MONTH = new Intl.DateTimeFormat("pt-BR", { month: "short", year: "numeric", timeZone: "UTC" });
@@ -66,7 +94,7 @@ const initials = (name: string) => {
  * "termina → começa". Para ligar: arraste a bolinha no fim de uma barra até a tarefa que vem
  * depois, ou clique na bolinha e depois na tarefa (serve para toque e teclado). Clicar numa seta
  * desfaz a ligação. O servidor continua recusando ciclo e quem não pode editar. */
-export function Timeline({ tasks, canWrite, onOpen }: { tasks: Task[]; canWrite: boolean; onOpen: (id: string) => void }) {
+export function Timeline({ tasks, canWrite, onOpen, projectId }: { tasks: Task[]; canWrite: boolean; onOpen: (id: string) => void; projectId?: string }) {
   const { add, remove } = useDependency();
   const toast = useToast();
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -79,10 +107,30 @@ export function Timeline({ tasks, canWrite, onOpen }: { tasks: Task[]; canWrite:
   const [hover, setHover] = useState<string | null>(null);
   const [hot, setHot] = useState<string | null>(null);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const phaseList = usePhases(projectId).data?.phases ?? [];
+  const phaseOrder = new Map(phaseList.map((p, i) => [p.name, i]));
   const [full, setFull] = useState(false);
   /** Ligação escolhida para remover (clique na seta) e onde abrir o balão de confirmação. */
   const [pending, setPending] = useState<{ taskId: string; depId: string; x: number; y: number } | null>(null);
   const popRef = useRef<HTMLDivElement>(null);
+
+  // ---------- linha de base ----------
+  const baselinesQ = useBaselines(projectId);
+  const baselines = baselinesQ.data?.baselines ?? [];
+  const [baseChoice, setBaseChoice] = useState<string | null>(() => readBase(projectId));
+  const [baseFilter, setBaseFilter] = useState<BaseFilter | null>(null);
+  const [baseDialog, setBaseDialog] = useState(false);
+  // Sem escolha salva (ou a salva foi excluída), compara com a mais recente.
+  const baseOn = baseChoice !== "off" && baseChoice !== null;
+  const baseId = baseOn ? (baselines.find((b) => b.id === baseChoice)?.id ?? baselines.at(-1)?.id ?? null) : null;
+  const baseMeta = baselines.find((b) => b.id === baseId);
+  const baseQ = useBaseline(projectId, baseId);
+  const chooseBase = (v: string) => {
+    setBaseChoice(v);
+    setBaseFilter(null);
+    writeBase(projectId, v);
+  };
+  const closeBaseDialog = useCallback(() => setBaseDialog(false), []);
 
   // Largura visível: o zoom "Ajustar" cabe a obra inteira nela.
   const hasRows = tasks.some((t) => t.due_date);
@@ -119,19 +167,22 @@ export function Timeline({ tasks, canWrite, onOpen }: { tasks: Task[]; canWrite:
 
   // Tela cheia: Esc sai (quando não está escolhendo uma ligação nem confirmando, que usam o mesmo Esc).
   useEffect(() => {
-    if (!full || linkFrom || pending) return;
+    if (!full || linkFrom || pending || baseDialog) return;
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && setFull(false);
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [full, linkFrom, pending]);
+  }, [full, linkFrom, pending, baseDialog]);
 
   // ---------- escala ----------
   const today = localToday();
   const created = (t: Task) => t.created_at.slice(0, 10);
   const from0 = (t: Task) => t.start_date ?? (created(t) && created(t) < t.due_date! ? created(t) : t.due_date!);
   const dated = tasks.filter((t) => t.due_date).sort((a, b) => from0(a).localeCompare(from0(b)) || a.due_date!.localeCompare(b.due_date!));
-  const firstDay = dated.length ? Math.min(ms(today), ...dated.map((t) => ms(from0(t)))) : ms(today);
-  const lastDay = dated.length ? Math.max(ms(today), ...dated.map((t) => ms(t.due_date!))) : ms(today);
+  const cmp = baseOn && baseQ.data ? compareBaseline(tasks, baseQ.data.tasks) : null;
+  // O eixo cobre também o planejado: a barra-fantasma de quem atrasou ou adiantou não some.
+  const baseItems: BaselineTask[] = cmp ? baseQ.data!.tasks : [];
+  const firstDay = dated.length ? Math.min(ms(today), ...dated.map((t) => ms(from0(t))), ...baseItems.map((b) => ms(plannedStart(b)))) : ms(today);
+  const lastDay = dated.length ? Math.max(ms(today), ...dated.map((t) => ms(t.due_date!)), ...baseItems.map((b) => ms(b.due_date))) : ms(today);
   // Começa numa segunda-feira (o eixo de semanas fica alinhado) e sobra respiro no fim.
   const startMs = firstDay - (((new Date(firstDay).getUTCDay() + 6) % 7) + 3) * DAY;
   const days = Math.round((lastDay - startMs) / DAY) + 8;
@@ -190,23 +241,35 @@ export function Timeline({ tasks, canWrite, onOpen }: { tasks: Task[]; canWrite:
   if (!dated.length) return <Empty title="Cronograma vazio">Defina início e prazo nas tarefas (ou aplique uma EAP do assistente) para ver a linha do tempo.</Empty>;
 
   // ---------- linhas: agrupadas por fase quando houver ----------
+  // Com um filtro da comparação ligado, só aparece aquele grupo (as que ficaram fora do
+  // cronograma não são tarefas atuais: viram linhas só com a barra planejada).
+  const filterIds =
+    cmp && baseFilter && baseFilter !== "missing" ? new Set({ late: cmp.late, early: cmp.early, added: cmp.added }[baseFilter].map((t) => t.id)) : null;
+  const rows = cmp && baseFilter === "missing" ? [] : filterIds ? dated.filter((t) => filterIds.has(t.id)) : dated;
+  const span = (bs: (BaselineTask | undefined)[]) => {
+    const ok = bs.filter((b): b is BaselineTask => !!b);
+    return ok.length ? { from: ok.map(plannedStart).sort()[0], to: ok.map((b) => b.due_date).sort().at(-1)! } : undefined;
+  };
   const items: Item[] = [];
   const phases: string[] = [];
-  if (dated.some((t) => t.phase)) {
+  if (rows.some((t) => t.phase)) {
     const groups = new Map<string, Task[]>();
-    for (const t of dated) groups.set(t.phase || "Sem fase", [...(groups.get(t.phase || "Sem fase") ?? []), t]);
-    const ordered = [...groups].sort(([a], [b]) => (a === "Sem fase" ? 1 : b === "Sem fase" ? -1 : 0));
+    for (const t of rows) groups.set(t.phase || "Sem fase", [...(groups.get(t.phase || "Sem fase") ?? []), t]);
+    // Na ordem das fases do projeto; "Sem fase" por último.
+    const rank = (n: string) => (n === "Sem fase" ? Infinity : (phaseOrder.get(n) ?? phaseOrder.size));
+    const ordered = [...groups].sort(([a], [b]) => rank(a) - rank(b));
     for (const [name, list] of ordered) {
       const from = list.map(from0).sort()[0];
       const to = list.map((t) => t.due_date!).sort().at(-1)!;
       phases.push(name);
-      items.push({ kind: "phase", key: `phase:${name}`, name, from, to });
+      items.push({ kind: "phase", key: `phase:${name}`, name, from, to, base: cmp ? span(list.map((t) => cmp.planned.get(t.id))) : undefined });
       // Fase recolhida mostra só a barra-resumo.
       if (!collapsed.has(name)) for (const t of list) items.push({ kind: "task", key: t.id, task: t });
     }
   } else {
-    for (const t of dated) items.push({ kind: "task", key: t.id, task: t });
+    for (const t of rows) items.push({ kind: "task", key: t.id, task: t });
   }
+  if (cmp && baseFilter === "missing") for (const m of cmp.missing) items.push({ kind: "missing", key: `missing:${m.task_id}`, item: m });
   const yTop = new Map<string, number>();
   let bodyH = 0;
   for (const it of items) {
@@ -337,6 +400,9 @@ export function Timeline({ tasks, canWrite, onOpen }: { tasks: Task[]; canWrite:
   const showDays = ppd >= 22;
   const showWeeks = !showDays && ppd * 7 >= 26;
   const todayX = xOf(today) + ppd / 2;
+  const baseEndX = cmp?.plannedFinish ? xOf(cmp.plannedFinish) + ppd : null;
+  /** Barra-fantasma do planejado: do início (ou do prazo, se não havia início) ao fim do prazo. */
+  const baseBar = (from: string, to: string) => ({ left: xOf(from), width: Math.max(6, xOf(to) + ppd - xOf(from)) });
 
   const barClass = (t: Task) =>
     [
@@ -354,6 +420,21 @@ export function Timeline({ tasks, canWrite, onOpen }: { tasks: Task[]; canWrite:
           <span className="coord">{dated.length} tarefas · {edges.length} ligações</span>
         </div>
         <div className="g-actions">
+          {projectId && baselines.length > 0 && (
+            <div className="g-basectl" role="group" aria-label="Linha de base">
+              <button type="button" className="btn btn-ghost btn-sm" aria-pressed={baseOn} title={baseOn ? "Parar de comparar" : "Comparar o cronograma com uma linha de base"} onClick={() => chooseBase(baseOn ? "off" : baselines.at(-1)!.id)}>
+                <Layers size={15} aria-hidden /> Linha de base
+              </button>
+              {baseOn && (
+                <select className="g-baseselect" aria-label="Comparar com" value={baseId ?? ""} onChange={(e) => chooseBase(e.target.value)}>
+                  {[...baselines].reverse().map((b) => <option key={b.id} value={b.id}>{baselineLabel(b)}</option>)}
+                </select>
+              )}
+              <button type="button" className="btn btn-ghost btn-sm g-icon" aria-label="Linhas de base: salvar e gerenciar" title="Salvar e gerenciar linhas de base" onClick={() => setBaseDialog(true)}>
+                <Settings2 size={15} aria-hidden />
+              </button>
+            </div>
+          )}
           {phases.length > 1 && (
             <button type="button" className="btn btn-ghost btn-sm" onClick={() => setCollapsed(collapsed.size ? new Set() : new Set(phases))}>
               {collapsed.size ? <ChevronsUpDown size={15} aria-hidden /> : <ChevronsDownUp size={15} aria-hidden />} {collapsed.size ? "Expandir fases" : "Recolher fases"}
@@ -376,6 +457,34 @@ export function Timeline({ tasks, canWrite, onOpen }: { tasks: Task[]; canWrite:
           </button>
         </div>
       </div>
+      {baseOn && baseQ.isLoading && <div className="g-basebar coord" role="status">Carregando linha de base…</div>}
+      {cmp && baseMeta && (() => {
+        const chips: [BaseFilter, number, string, string][] = [
+          ["late", cmp.late.length, cmp.late.length === 1 ? "atrasou" : "atrasaram", "Terminam depois do planejado"],
+          ["early", cmp.early.length, cmp.early.length === 1 ? "adiantou" : "adiantaram", "Terminam antes do planejado"],
+          ["added", cmp.added.length, cmp.added.length === 1 ? "nova" : "novas", "Não estavam nesta linha de base"],
+          ["missing", cmp.missing.length, "fora do cronograma", "Estavam no plano, mas foram removidas ou perderam o prazo"],
+        ];
+        const d = cmp.projectDelta;
+        return (
+          <div className="g-basebar" role="group" aria-label={`Comparação com ${baselineLabel(baseMeta)}`}>
+            <span className="g-base-term" title={baseMeta.note || undefined}>
+              <span className="coord">Término</span> <span className="g-base-planned">{fmtDate(cmp.plannedFinish)}</span>
+              <ArrowRight size={13} aria-label="agora" /> <strong>{fmtDate(cmp.currentFinish)}</strong>
+              {d !== null && <span className={`g-var ${d > 0 ? "late" : d < 0 ? "early" : "same"}`} title={deltaText(d)}>{deltaLabel(d)}</span>}
+            </span>
+            <span className="g-chips">
+              {chips.filter(([, n]) => n > 0).map(([k, n, text, hint]) => (
+                <button key={k} type="button" className={`g-chip ${k}`} aria-pressed={baseFilter === k} title={`${hint}. Clique para ${baseFilter === k ? "ver todas" : "ver só estas"}.`} onClick={() => setBaseFilter(baseFilter === k ? null : k)}>
+                  <b>{n}</b> {text}
+                </button>
+              ))}
+              {cmp.onPlan.length > 0 && <span className="g-chip-static"><b>{cmp.onPlan.length}</b> no plano</span>}
+              {baseFilter && <button type="button" className="btn btn-ghost btn-sm" onClick={() => setBaseFilter(null)}><X size={14} aria-hidden /> Mostrar todas</button>}
+            </span>
+          </div>
+        );
+      })()}
       {linkFrom && sourceTask ? (
         <div className="tl-banner" role="status">
           <span>Escolha a tarefa que só começa depois de <strong>{sourceTask.title}</strong>.</span>
@@ -397,6 +506,7 @@ export function Timeline({ tasks, canWrite, onOpen }: { tasks: Task[]; canWrite:
                 ))}
               </div>
               <span className="g-today-pill" style={{ left: todayX }}>Hoje</span>
+              {baseEndX !== null && <span className="g-base-pill" style={{ left: baseEndX }} title={`Término planejado em ${baseMeta ? baselineLabel(baseMeta) : "linha de base"}: ${fmtDate(cmp!.plannedFinish)}`}>Fim LB</span>}
             </div>
           </div>
 
@@ -406,6 +516,7 @@ export function Timeline({ tasks, canWrite, onOpen }: { tasks: Task[]; canWrite:
               {(showDays || showWeeks) && ticks.filter((t) => t.monday).map((t) => <line key={t.x} x1={t.x} x2={t.x} y1={0} y2={bodyH} className="g-week" />)}
               {months.map((m) => <line key={m.left} x1={m.left} x2={m.left} y1={0} y2={bodyH} className="g-month" />)}
               <line x1={todayX} x2={todayX} y1={0} y2={bodyH} className="g-today" />
+              {baseEndX !== null && <line x1={baseEndX} x2={baseEndX} y1={0} y2={bodyH} className="g-base-end" />}
             </svg>
 
             {items.map((it) => {
@@ -425,17 +536,49 @@ export function Timeline({ tasks, canWrite, onOpen }: { tasks: Task[]; canWrite:
                         <span>{it.name}</span>
                       </button>
                     </div>
-                    <div className="g-chart"><span className="g-summary" style={{ left: l, width: Math.max(8, r - l) }} title={`${it.name}: ${fmtDate(it.from)} → ${fmtDate(it.to)}`} /></div>
+                    <div className="g-chart">
+                      <span className="g-summary" style={{ left: l, width: Math.max(8, r - l) }} title={`${it.name}: ${fmtDate(it.from)} → ${fmtDate(it.to)}`} />
+                      {it.base && (
+                        <span className="g-base phase" style={baseBar(it.base.from, it.base.to)} title={`${it.name} na linha de base: ${fmtDate(it.base.from)} → ${fmtDate(it.base.to)}`} />
+                      )}
+                    </div>
+                  </div>
+                );
+              }
+              if (it.kind === "missing") {
+                const b = it.item;
+                const bb = baseBar(plannedStart(b), b.due_date);
+                const text = `${b.title}: planejada ${b.start_date ? `de ${fmtDate(b.start_date)} ` : ""}até ${fmtDate(b.due_date)}; ${b.reason === "removida" ? "a tarefa foi removida" : "hoje está sem prazo"}`;
+                return (
+                  <div key={it.key} className="g-row g-missing" style={{ height: ROW }}>
+                    <div className="g-label">
+                      {b.reason === "sem prazo" ? (
+                        <button className="title tl-title" onClick={() => onOpen(b.task_id)} title={b.title}>{b.title}</button>
+                      ) : (
+                        <span className="tl-title g-missing-title" title={b.title}>{b.title}</span>
+                      )}
+                    </div>
+                    <div className="g-chart">
+                      <span role="img" aria-label={text} title={text} className="g-base solo" style={bb} />
+                      <span className="g-meta" style={{ left: bb.left + bb.width + 8 }}><span className="g-var missing">{b.reason}</span></span>
+                    </div>
                   </div>
                 );
               }
               const t = it.task;
               const g = geo(t);
+              const pb = cmp?.planned.get(t.id);
+              const delta = cmp ? cmp.finishDelta(t) : null;
+              const pbBar = pb && !pb.is_milestone && !t.is_milestone ? baseBar(plannedStart(pb), pb.due_date) : null;
+              const baseInfo = !cmp ? "" : pb ? `Na linha de base: ${pb.start_date ? `${fmtDate(pb.start_date)} → ` : "prazo "}${fmtDate(pb.due_date)} (${deltaText(delta!)})` : "Não estava na linha de base";
+              // "16/11 – 30/11" em mono 11px ocupa ~100px com o padding; abaixo disso a data vai para fora da barra.
+              const datesInside = !t.is_milestone && g.right - g.left >= 104;
+              const metaLeft = Math.max(g.right, pb ? xOf(pb.due_date) + ppd : 0) + (canWrite ? 22 : 8);
               const conflicts = scheduleConflicts(t, tasks);
               const deps = (t.depends_on_ids ?? []).map((id) => byId.get(id)?.title).filter(Boolean);
               const target = source && source !== t.id ? (canTarget(t) ? "ok" : "no") : null;
               const dur = idx(t.due_date!) - idx(from0(t)) + 1;
-              const aria = `${t.title}: ${t.start_date ? `início ${fmtDate(t.start_date)}, ` : ""}prazo ${fmtDate(t.due_date)}, ${STATUS_LABEL[t.status]}${deps.length ? `. Depende de ${deps.join(", ")}` : ""}${conflicts.length ? `. Começa antes de ${conflicts.map((c) => c.title).join(", ")} terminar` : ""}`;
+              const aria = `${t.title}: ${t.start_date ? `início ${fmtDate(t.start_date)}, ` : ""}prazo ${fmtDate(t.due_date)}, ${STATUS_LABEL[t.status]}${deps.length ? `. Depende de ${deps.join(", ")}` : ""}${conflicts.length ? `. Começa antes de ${conflicts.map((c) => c.title).join(", ")} terminar` : ""}${baseInfo ? `. ${baseInfo}` : ""}`;
               const pick = () => (linkFrom ? link(linkFrom, t.id) : onOpen(t.id));
               const cls = [
                 "g-row",
@@ -443,6 +586,7 @@ export function Timeline({ tasks, canWrite, onOpen }: { tasks: Task[]; canWrite:
                 hover === t.id && target ? "tl-over" : "",
                 source === t.id ? "tl-source" : "",
                 lit ? (chain.has(t.id) ? "g-in" : "g-out") : "",
+                cmp ? "g-based" : "",
               ].join(" ");
               return (
                 <div className={cls} key={t.id} data-tl-row={t.id} style={{ height: ROW }} onMouseEnter={() => setHot(t.id)} onMouseLeave={() => setHot(null)}>
@@ -456,18 +600,32 @@ export function Timeline({ tasks, canWrite, onOpen }: { tasks: Task[]; canWrite:
                     {linkFrom && target === "ok" && (
                       <button type="button" className="tl-pick" onClick={pick} aria-label={`${t.title} começa depois de ${sourceTask?.title ?? ""}`} />
                     )}
+                    {pbBar && <span className="g-base" style={pbBar} aria-hidden />}
+                    {pb && !pbBar && <span className="g-base-ms" style={{ left: xOf(pb.due_date) + ppd / 2 - 5 }} aria-hidden />}
                     <div
                       role="img"
                       aria-label={aria}
                       className={`${barClass(t)} ${conflicts.length ? "conflict" : ""}`}
                       style={t.is_milestone ? { left: g.center - 8 } : { left: g.left, width: g.right - g.left }}
-                      title={`${t.title}\n${t.start_date ? fmtDate(t.start_date) : "sem início"} → ${fmtDate(t.due_date)} (${dur} ${dur === 1 ? "dia" : "dias"})\n${STATUS_LABEL[t.status]}${t.assignee_name ? ` · ${t.assignee_name}` : ""}`}
+                      title={`${t.title}\n${t.start_date ? fmtDate(t.start_date) : "sem início"} → ${fmtDate(t.due_date)} (${dur} ${dur === 1 ? "dia" : "dias"})\n${STATUS_LABEL[t.status]}${t.assignee_name ? ` · ${t.assignee_name}` : ""}${baseInfo ? `\n${baseInfo}` : ""}`}
                     >
                       {!t.is_milestone && t.status !== "done" && t.progress > 0 && <span className="g-progress" style={{ width: `${t.progress}%` }} />}
-                      {!t.is_milestone && g.right - g.left > 70 && <span className="g-bar-text">{short(from0(t))} – {short(t.due_date!)}</span>}
+                      {datesInside && (
+                        <>
+                          <span className="g-bar-text">{short(from0(t))} – {short(t.due_date!)}</span>
+                          {/* Cópia em cor invertida recortada no trecho preenchido: o texto continua legível quando cruza a borda do progresso. */}
+                          {t.status !== "done" && t.progress > 0 && (
+                            <span className="g-bar-text on-fill" style={{ clipPath: `inset(0 ${100 - t.progress}% 0 0)` }} aria-hidden>
+                              {short(from0(t))} – {short(t.due_date!)}
+                            </span>
+                          )}
+                        </>
+                      )}
                     </div>
-                    <span className="g-meta" style={{ left: g.right + (canWrite ? 22 : 8) }}>
+                    <span className="g-meta" style={{ left: metaLeft }}>
                       {t.is_milestone && <span>{short(t.due_date!)}</span>}
+                      {!t.is_milestone && !datesInside && <span>{short(from0(t))} – {short(t.due_date!)}</span>}
+                      {cmp && (delta === null ? <span className="g-var added">nova</span> : delta !== 0 && <span className={`g-var ${delta > 0 ? "late" : "early"}`}>{deltaLabel(delta)}</span>)}
                       {t.assignee_name && <span className="g-avatar" title={t.assignee_name}>{initials(t.assignee_name)}</span>}
                     </span>
                     {canWrite && (
@@ -563,8 +721,12 @@ export function Timeline({ tasks, canWrite, onOpen }: { tasks: Task[]; canWrite:
         <span><i className="g-key no-start" /> Sem data de início</span>
         <span><i className="g-key milestone" /> Marco</span>
         <span><TriangleAlert size={12} aria-hidden /> Começa antes de uma dependência terminar</span>
+        {cmp && baseMeta && <span><i className="g-key base" /> Planejado em {baselineLabel(baseMeta)}</span>}
         {hidden > 0 && <span>{hidden} dependência(s) com tarefa sem prazo não aparecem aqui</span>}
       </div>
+      {baseDialog && projectId && (
+        <BaselineDialog projectId={projectId} baselines={baselines} canManage={!!baselinesQ.data?.can_manage} selected={baseId} onSelect={chooseBase} onClose={closeBaseDialog} />
+      )}
     </div>
   );
 }

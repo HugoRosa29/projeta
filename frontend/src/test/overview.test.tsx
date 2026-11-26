@@ -4,7 +4,7 @@ import { MemoryRouter } from "react-router";
 import { describe, expect, it } from "vitest";
 import type { PortfolioRow } from "../domain/formal";
 import { OTHERS, applyFilter, defaultField, fieldBars, overdueBars, phaseBars, progressBars, summarize } from "../domain/overview";
-import { Panorama } from "../features/today/Overview";
+import { Panorama } from "../features/portfolio/Panorama";
 
 function row(over: Partial<PortfolioRow> & { id: string }): PortfolioRow {
   return {

@@ -1,4 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
+import { PanelRightClose, PanelRightOpen } from "lucide-react";
 import { useState } from "react";
 import { Link } from "react-router";
 import { Empty, ErrorBox, Loading } from "../../components/ui";
@@ -8,7 +9,7 @@ import { useSession } from "../../app/session";
 import { QuickAdd, TaskDialog, TaskList } from "../tasks/TaskParts";
 import { isLead } from "../../domain/okr";
 import { MyCheckins, OkrPulse } from "../okrs/OkrCards";
-import { Overview } from "./Overview";
+import { AreaBlocks } from "./AreaBlocks";
 
 interface TodayData {
   today: string;
@@ -28,6 +29,30 @@ const BUCKETS: [Bucket, string][] = [
   ["inbox", "Sem prazo"],
 ];
 
+const SIDE_KEY = "projeta-home-side";
+
+/** Coluna lateral (OKRs e tarefas) recolhível, para o panorama ocupar a largura toda. É
+ *  preferência de leitura deste navegador, não dado do espaço: fica no localStorage. */
+function useSideHidden(): [boolean, () => void] {
+  const [hidden, setHidden] = useState(() => {
+    try {
+      return localStorage.getItem(SIDE_KEY) === "hidden";
+    } catch {
+      return false;
+    }
+  });
+  const toggle = () =>
+    setHidden((h) => {
+      try {
+        localStorage.setItem(SIDE_KEY, h ? "shown" : "hidden");
+      } catch {
+        /* armazenamento bloqueado: vale só nesta sessão */
+      }
+      return !h;
+    });
+  return [hidden, toggle];
+}
+
 /** Cumprimento pela hora local de quem abre a tela. */
 export function greeting(hour: number): string {
   if (hour < 5 || hour >= 18) return "Boa noite";
@@ -42,12 +67,14 @@ export function initials(name: string): string {
   return (parts[0][0] + last).toUpperCase();
 }
 
-/** Home em formato de painel: no desktop cabe numa tela só. O panorama ocupa a coluna principal
- *  e rola por dentro; a coluna lateral reúne OKRs e o trabalho da própria pessoa. */
+/** Home em formato de painel: no desktop cabe numa tela só. O panorama em blocos por área ocupa
+ *  a coluna principal e rola por dentro (o quadro detalhado fica no portfólio); a coluna
+ *  lateral reúne OKRs e o trabalho da própria pessoa. */
 export function TodayPage() {
   const { workspace, user } = useSession();
   const [open, setOpen] = useState<string | null>(null);
   const [showPanorama, setShowPanorama] = useState(false);
+  const [sideHidden, toggleSide] = useSideHidden();
   // Só muda a ordem e o destaque da tela; o que cada um vê continua decidido pelo servidor.
   const lead = isLead(workspace);
   const q = useQuery({ queryKey: ["today", workspace.id], queryFn: () => api.get<TodayData>("/today", { workspace_id: workspace.id }) });
@@ -55,7 +82,7 @@ export function TodayPage() {
   const date = d && new Date(`${d.today}T12:00:00`).toLocaleDateString("pt-BR", { weekday: "long", day: "numeric", month: "long" });
 
   return (
-    <div className="dash">
+    <div className={`dash${sideHidden ? " dash-wide" : ""}`}>
       <header className="dash-hello">
         <span className="dash-avatar" aria-hidden>{initials(user.name)}</span>
         <div className="dash-hello-text">
@@ -63,11 +90,15 @@ export function TodayPage() {
           {date && <p className="dash-date">{date} · {workspace.name}</p>}
         </div>
         <span className="dash-mode">{lead ? "Visão de gestão" : "Meu dia"}</span>
+        <button type="button" className="dash-side-toggle" aria-pressed={sideHidden} aria-controls="dash-side" onClick={toggleSide}>
+          {sideHidden ? <PanelRightOpen size={16} aria-hidden /> : <PanelRightClose size={16} aria-hidden />}
+          {sideHidden ? "Mostrar OKRs e tarefas" : "Esconder OKRs e tarefas"}
+        </button>
       </header>
 
       <div className="dash-main">
         {lead || showPanorama ? (
-          <Overview workspaceId={workspace.id} workspaceName={workspace.name} />
+          <AreaBlocks workspaceId={workspace.id} workspaceName={workspace.name} />
         ) : (
           // Execução: o panorama fica a um clique (ADR 0005); o trabalho da pessoa vem primeiro, ao lado.
           <div className="card dash-placeholder">
@@ -77,7 +108,7 @@ export function TodayPage() {
         )}
       </div>
 
-      <aside className="dash-side" aria-label="Seu trabalho">
+      <aside className="dash-side" id="dash-side" aria-label="Seu trabalho" hidden={sideHidden}>
         {lead && <OkrPulse workspaceId={workspace.id} suggest={workspace.kind === "team"} />}
         <MyCheckins workspaceId={workspace.id} />
         <section className="card dash-tasks" aria-labelledby="dash-tasks-title">

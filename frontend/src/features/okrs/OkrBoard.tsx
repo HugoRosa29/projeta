@@ -1,5 +1,5 @@
 import { BarChart3, ChevronDown, Clock, FolderKanban, History, Pencil, Plus, Search, Table2, Trash2, X } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { Link } from "react-router";
 import { PALETTE } from "../../domain/board";
 import {
@@ -53,10 +53,13 @@ export function OkrBoard({
   d,
   onCheckin,
   manage,
+  share,
 }: {
   d: Board;
   onCheckin: (kr: KeyResult, siblings: KeyResult[]) => void;
   manage?: BoardActions;
+  /** Botão de compartilhar de cada objetivo (só na página de Metas, que conhece o espaço). */
+  share?: (o: Objective) => ReactNode;
 }) {
   const [filter, setFilter] = useState<KrFilter>(NO_KR_FILTER);
   const [sort, setSort] = useState<KrSort>("position");
@@ -171,6 +174,7 @@ export function OkrBoard({
               onToggle={() => toggle(o.id)}
               onCheckin={(kr) => onCheckin(kr, o.key_results.map((x) => ({ ...x, objective_title: o.title })))}
               manage={manage}
+              share={share}
             />
           ))}
         </div>
@@ -233,6 +237,7 @@ function ObjectiveGroup({
   onToggle,
   onCheckin,
   manage,
+  share,
 }: {
   o: Objective;
   color: string;
@@ -241,6 +246,7 @@ function ObjectiveGroup({
   onToggle: () => void;
   onCheckin: (kr: KeyResult) => void;
   manage?: BoardActions;
+  share?: (o: Objective) => ReactNode;
 }) {
   const sum = objectiveSummary(o);
   const n = o.key_results.length;
@@ -253,20 +259,26 @@ function ObjectiveGroup({
           <ChevronDown size={18} aria-hidden className="pn-chev" />
           <span className="okr-gtitle">{o.title}</span>
         </button>
+        {o.shared_from && <span className="badge">de {o.shared_from}</span>}
         <span className="okr-gmeta">
           <span>{o.owner_name ?? "sem responsável"}</span>
           <span>{plural(n, "KR", "KRs")}</span>
           <strong>{o.progress}%</strong>
           {behind && <span className="badge warn">ritmo abaixo do previsto</span>}
         </span>
-        {manage && (
+        {(manage || share) && (
           <span className="okr-acts okr-gacts">
+            {share?.(o)}
+            {manage && (
+              <>
             <button type="button" className="okr-icon" onClick={() => manage.onEditObjective(o)} aria-label={`Editar objetivo ${o.title}`} title="Editar objetivo">
               <Pencil size={15} aria-hidden />
             </button>
             <button type="button" className="okr-icon" onClick={() => manage.onDeleteObjective(o)} aria-label={`Remover objetivo ${o.title}`} title="Remover objetivo">
               <Trash2 size={15} aria-hidden />
             </button>
+              </>
+            )}
           </span>
         )}
       </header>

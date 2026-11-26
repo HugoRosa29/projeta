@@ -15,7 +15,9 @@ from ..identity.access import (
     role_in,
     task_access,
 )
+from . import phases
 from .activity import log_activity
+from .baselines import capture_first_plan
 from .schedule import cascade, linked_start
 from .sprints import assert_target, move_tasks
 
@@ -160,11 +162,15 @@ def create_task(
             parent_id,
         )
     sprint_id = fields.get("sprint_id") or None
+    phase = phases.clean_name(fields.get("phase"))
     if parent_id:
-        # Subtarefa acompanha a sprint da mãe, seja qual for a enviada.
-        mother = ctx.one("SELECT sprint_id FROM tasks WHERE id=%s", (parent_id,))
+        # Subtarefa acompanha a sprint e a fase da mãe, sejam quais forem as enviadas.
+        mother = ctx.one("SELECT sprint_id, phase FROM tasks WHERE id=%s", (parent_id,))
         assert mother
         sprint_id = str(mother["sprint_id"]) if mother["sprint_id"] else None
+        phase = mother["phase"]
+    elif project_id:
+        phase = phases.resolve(ctx, project_id, phase)
     elif sprint_id:
         if not project_id:
             raise BadRequestError("Tarefa pessoal não entra em sprint. Crie a tarefa no projeto.")
@@ -187,7 +193,7 @@ def create_task(
             fields.get("due_date"),
             fields.get("estimate_minutes"),
             100 if status == "done" else (fields.get("progress") or 0),
-            fields.get("phase"),
+            phase,
             bool(fields.get("is_milestone")),
             fields.get("labels") or [],
             pos["p"],
@@ -203,6 +209,7 @@ def create_task(
     task = ctx.one(f"{TASK_SELECT} WHERE t.id=%s", (row["id"],))
     assert task
     if project_id:
+        capture_first_plan(ctx, project_id, [str(row["id"])])
         log_activity(
             ctx, ws_id, "task.created", project_id, task["id"], {"title": task["title"]}, via
         )
@@ -369,6 +376,19 @@ def update_task(
         new_sprint = str(mother["sprint_id"]) if mother["sprint_id"] else None
         sprint_changed = str(task["sprint_id"] or "") != (new_sprint or "")
 
+    # Fase: subtarefa acompanha a mãe; tarefa principal grava o nome registrado no projeto.
+    parent_after = fields["parent_id"] if "parent_id" in fields else task["parent_id"]
+    if parent_after and ("phase" in fields or fields.get("parent_id")):
+        mother = ctx.one("SELECT phase FROM tasks WHERE id=%s", (parent_after,))
+        assert mother
+        fields["phase"] = mother["phase"]
+    elif "phase" in fields:
+        fields["phase"] = phases.clean_name(fields["phase"])
+        if task["project_id"]:
+            fields["phase"] = phases.resolve(ctx, str(task["project_id"]), fields["phase"])
+    if "phase" in fields and fields["phase"] == task["phase"]:
+        del fields["phase"]
+
     sets: dict[str, Any] = {k: v for k, v in fields.items() if k != "status"}
     if "title" in sets:
         sets["title"] = sets["title"].strip()
@@ -391,8 +411,18 @@ def update_task(
         )
     if sprint_changed:
         move_tasks(ctx, [task_id], new_sprint)
+    if "phase" in sets and not parent_after:
+        # As subtarefas acompanham a mãe para a nova fase.
+        ctx.run(
+            "UPDATE tasks SET phase = %s, version = version + 1, updated_at = now() "
+            "WHERE parent_id = %s AND phase IS DISTINCT FROM %s",
+            (sets["phase"], task_id, sets["phase"]),
+        )
     if "due_date" in sets and str(sets["due_date"] or "") != str(task["due_date"] or ""):
         cascade(ctx, [task_id], include_seeds=False, via=via)  # quem depende desta anda junto
+        if task["project_id"]:
+            # Primeiro prazo da tarefa vira o plano original dela (já registrada: nada muda).
+            capture_first_plan(ctx, str(task["project_id"]), [task_id])
     after = ctx.one(f"{TASK_SELECT} WHERE t.id=%s", (task_id,))
     assert after
     if task["project_id"]:
@@ -408,6 +438,7 @@ def update_task(
                 "progress",
                 "parent_id",
                 "sprint_id",
+                "phase",
             )
             if task[k] != after[k]
         }

@@ -17,12 +17,14 @@ export interface TaskCreateInput {
   parent_id?: string | null;
   sprint_id?: string | null;
   is_milestone?: boolean;
+  /** Nome da fase do projeto; o servidor registra a fase se ainda não existir. */
+  phase?: string | null;
 }
 
 export function useInvalidateWork() {
   const qc = useQueryClient();
   return () => {
-    for (const k of ["tasks", "task", "today", "project", "projects", "agenda", "sprints"]) qc.invalidateQueries({ queryKey: [k] });
+    for (const k of ["tasks", "task", "today", "project", "projects", "agenda", "sprints", "baseline", "baselines", "phases"]) qc.invalidateQueries({ queryKey: [k] });
   };
 }
 

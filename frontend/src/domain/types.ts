@@ -112,6 +112,8 @@ export interface Project {
   attributes?: ProjectAttribute[];
   /** % concluído informado por quem gerencia; nulo = calculado pelas tarefas. */
   progress?: number | null;
+  /** Pasta no espaço dono; sempre nula para projeto recebido pelo organograma. */
+  folder_id?: string | null;
 }
 export interface Member {
   id: string;
@@ -140,8 +142,15 @@ export const ACTIVITY_LABEL: Record<string, string> = {
   "project.phase_changed": "mudou a fase do projeto",
   "project.status_note": "publicou uma nota de acompanhamento",
   "project.progress_set": "atualizou o % concluído do projeto",
+  "project.folder_set": "mudou a pasta do projeto",
   "project.tap_saved": "salvou o Termo de Abertura",
   "project.tep_saved": "salvou o Termo de Encerramento",
+  "baseline.created": "salvou uma linha de base do cronograma",
+  "baseline.deleted": "excluiu uma linha de base do cronograma",
+  "risk.created": "registrou o risco",
+  "risk.updated": "atualizou o risco",
+  "risk.reviewed": "revisou o risco",
+  "risk.deleted": "excluiu o risco",
   "task.created": "criou a tarefa",
   "task.updated": "editou a tarefa",
   "task.rescheduled": "reprogramou (seguindo a dependência) a tarefa",

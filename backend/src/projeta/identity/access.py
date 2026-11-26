@@ -28,6 +28,13 @@ SHARED_TO_ME = f"""EXISTS (
   JOIN workspace_members shm ON shm.workspace_id = shw.id AND shm.user_id = %(uid)s
   WHERE sh.project_id = p.id
     AND (shm.role = 'admin' OR {_HAS.format(ws="shw", wm="shm", perm="org.view_shared")}))"""
+# Mesmo critério para o objetivo o (OKR) compartilhado pelo organograma (objective_shares).
+OBJECTIVE_SHARED_TO_ME = f"""EXISTS (
+  SELECT 1 FROM objective_shares sh
+  JOIN workspaces shw ON shw.org_unit = sh.unit
+  JOIN workspace_members shm ON shm.workspace_id = shw.id AND shm.user_id = %(uid)s
+  WHERE sh.objective_id = o.id
+    AND (shm.role = 'admin' OR {_HAS.format(ws="shw", wm="shm", perm="org.view_shared")}))"""
 VISIBLE_PROJECT = f"""(EXISTS (
   SELECT 1 FROM workspace_members wm JOIN workspaces wsp ON wsp.id = wm.workspace_id
   WHERE wm.workspace_id = p.workspace_id AND wm.user_id = %(uid)s
