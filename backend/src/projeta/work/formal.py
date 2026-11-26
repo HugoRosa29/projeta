@@ -303,6 +303,20 @@ def draft_tep(ctx: Ctx, project_id: str) -> dict:
 
 # --- portfólio --------------------------------------------------------------------------
 
+# Coluna: por qual unidade filha direta do espaço que vê o projeto chegou (sobe o organograma a
+# partir do espaço de origem até a unidade cujo pai é a do espaço). Assim a COINT agrupa tudo o
+# que veio de DISID, DIRAU... sob COTIN, e a PRESIDÊNCIA, sob COINT: cada nível enxerga os filhos
+# diretos, não a árvore inteira. Nulo para projeto do próprio espaço e para compartilhamento
+# direto de fora da própria linha (ADR 0008): aí a interface usa o espaço de origem.
+VIA_UNIT = """CASE WHEN p.workspace_id <> %(ws)s THEN (
+  WITH RECURSIVE up AS (
+    SELECT u.sigla, u.label, u.parent FROM org_units u
+      JOIN workspaces ow ON ow.org_unit = u.sigla WHERE ow.id = p.workspace_id
+    UNION ALL
+    SELECT u.sigla, u.label, u.parent FROM org_units u JOIN up ON u.sigla = up.parent)
+  SELECT jsonb_build_object('sigla', up.sigla, 'label', COALESCE(NULLIF(up.label, ''), up.sigla))
+  FROM up JOIN workspaces vw ON vw.id = %(ws)s AND vw.org_unit = up.parent LIMIT 1) END AS via_unit"""
+
 
 def portfolio(ctx: Ctx, workspace_id: str) -> list[dict]:
     """Projetos ativos visíveis ao usuário no espaço, com situação e frescor do acompanhamento."""
@@ -331,7 +345,10 @@ def portfolio(ctx: Ctx, workspace_id: str) -> list[dict]:
           (SELECT pt.content->>'data_termino' FROM project_terms pt
              WHERE pt.project_id = p.id AND pt.kind = 'tap') AS tap_end,
           p.created_at::date AS created_on,
-          {SHARED_FROM}
+          -- Pasta só vale no espaço dono: quem recebeu pelo organograma não vê a organização alheia.
+          CASE WHEN p.workspace_id = %(ws)s THEN p.folder_id::text END AS folder_id,
+          {SHARED_FROM},
+          {VIA_UNIT}
         FROM projects p
         WHERE {IN_WORKSPACE_OR_RECEIVED} AND p.status = 'active' AND {VISIBLE_PROJECT}
         ORDER BY p.name""",

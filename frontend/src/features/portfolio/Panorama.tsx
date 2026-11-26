@@ -1,67 +1,26 @@
-import { useQuery } from "@tanstack/react-query";
 import { ChevronDown, X } from "lucide-react";
 import { useMemo, useState } from "react";
 import { Link } from "react-router";
-import { ErrorBox } from "../../components/ui";
 import { GROUP_LABEL, HEALTH_COLOR, daysText, elapsed, groupTracks, rangeText, type BoardGroup, type GroupBy } from "../../domain/board";
 import { PACE_LABEL, track, type Track } from "../../domain/esteira";
 import { HEALTH_LABEL, PHASE_LABEL, type Health, type PortfolioRow } from "../../domain/formal";
 import { NO_FILTER, applyFilter, byField, summarize, type OverviewFilter } from "../../domain/overview";
 import { fmtDate, isoDate } from "../../domain/types";
 import { attributeIndex, projectProgress } from "../../domain/work";
-import { api } from "../../services/api";
-import { areasOf, pickArea } from "../../domain/areas";
-import { AreaSummary, AreaTabs, areaQuery, useArea } from "./Areas";
 
 const fmt = (n: number) => n.toLocaleString("pt-BR");
 const plural = (n: number, one: string, many: string) => `${fmt(n)} ${n === 1 ? one : many}`;
 
-/** Panorama do espaço na home. Usa a mesma consulta do portfólio (mesmo cache, mesmo recorte do servidor). */
-export function Overview({ workspaceId, workspaceName }: { workspaceId: string; workspaceName: string }) {
-  const q = useQuery({
-    queryKey: ["portfolio", workspaceId],
-    queryFn: () => api.get<{ projects: PortfolioRow[] }>("/portfolio", { workspace_id: workspaceId }),
-  });
-  if (q.isError) return <ErrorBox error={q.error} onRetry={() => q.refetch()} />;
-  // Sem projeto ativo, o panorama não tem o que mostrar: a home fica só com as tarefas.
-  if (!q.data?.projects.length) return null;
-  return <AreaPanorama rows={q.data.projects} workspaceId={workspaceId} workspaceName={workspaceName} />;
-}
-
-/** Com projetos recebidos de outras áreas (organograma), separa por área: "Geral" com o resumo
- *  por área, ou o panorama de uma área só. Sem projetos recebidos, é o panorama de sempre. */
-function AreaPanorama({ rows, workspaceId, workspaceName }: { rows: PortfolioRow[]; workspaceId: string; workspaceName: string }) {
-  const [areaId, setArea] = useArea();
-  const areas = useMemo(() => areasOf(rows, workspaceId, workspaceName), [rows, workspaceId, workspaceName]);
-  const split = areas.length > 1;
-  const area = split ? pickArea(areas, areaId) : null;
-  return (
-    <>
-      {split && <AreaTabs areas={areas} current={area?.id ?? null} onPick={setArea} total={rows.length} />}
-      {split && !area && <AreaSummary areas={areas} onPick={setArea} />}
-      {/* A chave zera os filtros ao trocar de espaço ou de área: campos de um não valem no outro. */}
-      <Panorama
-        key={`${workspaceId}:${area?.id ?? ""}`}
-        rows={area ? area.rows : rows}
-        workspaceName={area ? area.label : workspaceName}
-        portfolioHref={`/portfolio${areaQuery(area?.id)}`}
-      />
-    </>
-  );
-}
-
-
 interface PanoramaProps {
   rows: PortfolioRow[];
   workspaceName: string;
-  portfolioHref?: string;
   /** Data de referência dos prazos ("aaaa-mm-dd"); fixa nos testes. */
   today?: string;
 }
 
-/** Panorama em formato de quadro, enxuto: poucos números no topo e os projetos em grupos
+/** Modo "Quadro" do portfólio, enxuto: poucos números no topo e os projetos em grupos
  *  recolhíveis, uma linha cada. Cor só onde pede atenção (risco, atraso, prazo vencido). */
-export function Panorama({ rows, workspaceName, portfolioHref = "/portfolio", today = isoDate(new Date()) }: PanoramaProps) {
+export function Panorama({ rows, workspaceName, today = isoDate(new Date()) }: PanoramaProps) {
   const [filter, setFilter] = useState<OverviewFilter>(NO_FILTER);
   const [picked, setGroupBy] = useState<GroupBy>("health");
   const [closed, setClosed] = useState<ReadonlySet<string>>(new Set());
@@ -120,7 +79,6 @@ export function Panorama({ rows, workspaceName, portfolioHref = "/portfolio", to
             </select>
           </label>
           {filtered && <button type="button" className="btn btn-ghost btn-sm" onClick={() => setFilter(NO_FILTER)}>Limpar filtros</button>}
-          <Link to={portfolioHref} className="btn btn-ghost btn-sm">Abrir portfólio</Link>
         </div>
       </div>
 
@@ -261,7 +219,7 @@ function Battery({ pct, name }: { pct: number; name: string }) {
   );
 }
 
-function Stat({ label, value, tone, pressed, onClick }: { label: string; value: string; tone?: string; pressed?: boolean; onClick?: () => void }) {
+export function Stat({ label, value, tone, pressed, onClick }: { label: string; value: string; tone?: string; pressed?: boolean; onClick?: () => void }) {
   const body = (
     <>
       <span className="pn-stat-v">{value}</span>

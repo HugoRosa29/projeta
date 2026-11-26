@@ -9,6 +9,7 @@ import { CheckinDialog } from "./CheckinDialog";
 import { MyCheckins, streakAfter, useMyOkrs } from "./OkrCards";
 import { KeyResultDialog, ObjectiveDialog } from "./OkrEditors";
 import { OkrBoard } from "./OkrBoard";
+import { ShareButton } from "../sharing/ShareButton";
 
 type Editing =
   | { kind: "objective"; objective?: Objective }
@@ -40,6 +41,9 @@ export function OkrPage() {
   });
 
   const d = q.data;
+  const share = workspace.kind === "team"
+    ? (o: Objective) => <ShareButton workspaceId={workspace.id} kind="objective" id={o.id} name={o.title} className="okr-icon" compact />
+    : undefined;
   const manage = d?.can_manage ?? false;
   const openCheckin = (kr: KeyResult, siblings: KeyResult[]) => {
     // Quem abre o próprio KR segue para os outros seus que pedem atualização, na mesma janela.
@@ -86,6 +90,7 @@ export function OkrPage() {
         <OkrBoard
           d={d}
           onCheckin={openCheckin}
+          share={share}
           manage={
             manage
               ? {
@@ -99,6 +104,14 @@ export function OkrPage() {
               : undefined
           }
         />
+      )}
+
+      {d && d.received.objectives.length > 0 && (
+        <section aria-labelledby="okr-received-title" style={{ marginTop: 24 }}>
+          <h2 id="okr-received-title">Recebidos das unidades abaixo</h2>
+          <p className="muted">Objetivos que outras unidades compartilharam com a sua pelo organograma. Só leitura: o check-in é feito no espaço de origem.</p>
+          <OkrBoard d={{ ...d, objectives: d.received.objectives, summary: d.received.summary }} onCheckin={() => undefined} share={share} />
+        </section>
       )}
 
       {d && <HowItWorks manage={manage} />}

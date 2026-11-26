@@ -49,3 +49,14 @@ it("cumprimenta pela hora e mostra as iniciais", () => {
   expect(initials("Hugo Sousa Rosa")).toBe("HR");
   expect(initials("Ana")).toBe("A");
 });
+
+it("a coluna de OKRs e tarefas pode ser escondida, e a escolha fica no navegador", async () => {
+  localStorage.removeItem("projeta-home-side");
+  show("member");
+  const side = await screen.findByRole("complementary", { name: "Seu trabalho" });
+  await userEvent.click(screen.getByRole("button", { name: /Esconder OKRs e tarefas/ }));
+  expect(side).not.toBeVisible();
+  expect(localStorage.getItem("projeta-home-side")).toBe("hidden");
+  await userEvent.click(screen.getByRole("button", { name: /Mostrar OKRs e tarefas/ }));
+  expect(screen.getByRole("complementary", { name: "Seu trabalho" })).toBeVisible();
+});

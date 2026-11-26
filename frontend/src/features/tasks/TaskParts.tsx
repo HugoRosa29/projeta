@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { CornerDownRight, GripVertical, Link2, ListChecks, MessageCircle, NotebookPen, Plus, TriangleAlert, X } from "lucide-react";
-import { useEffect, useRef, useState, type DragEvent, type FormEvent } from "react";
+import { ArrowRight, CalendarDays, Check, CornerDownRight, Diamond, Flag, Folder, GripVertical, Layers, Link2, ListChecks, MessageCircle, NotebookPen, Plus, Repeat, Tag, Timer, Trash2, TriangleAlert, UserRound, X } from "lucide-react";
+import { useCallback, useEffect, useRef, useState, type DragEvent, type FormEvent, type ReactNode } from "react";
 import { Link } from "react-router";
 import { Dialog, ErrorBox, useToast } from "../../components/ui";
 import {
@@ -16,6 +16,7 @@ import {
 import { dependencyCandidates, nestTasks, postponeOptions, scheduleConflicts, subtaskCounts } from "../../domain/work";
 import { useAssistant } from "../../app/assistantContext";
 import { useSprints } from "../sprints/hooks";
+import { usePhases } from "../projects/phases";
 import { api } from "../../services/api";
 import { Comments } from "./Comments";
 import { useCreateTask, useDeleteTask, useDependency, useInvalidateWork, useUpdateTask } from "./hooks";
@@ -351,13 +352,19 @@ export function SubtaskBadge({ counts: [done, total] }: { counts: [number, numbe
 }
 
 /** Lista com subtarefas logo abaixo da mãe. `all` = lista completa, para contar subtarefas
- * mesmo quando um filtro esconde parte delas. */
-export function TaskList({ tasks, today, onOpen, all, quick, dependencies }: { tasks: Task[]; today?: string; onOpen: (id: string) => void; all?: Task[]; quick?: boolean; dependencies?: { canWrite: boolean } }) {
+ * mesmo quando um filtro esconde parte delas. Várias listas na mesma tela (uma por fase) passam
+ * `drag`/`setDrag` em comum, para arrastar de uma para outra. */
+export function TaskList({ tasks, today, onOpen, all, quick, dependencies, label }: { tasks: Task[]; today?: string; onOpen: (id: string) => void; all?: Task[]; quick?: boolean; dependencies?: { canWrite: boolean; drag?: string | null; setDrag?: (id: string | null) => void }; label?: string }) {
   const counts = subtaskCounts(all ?? tasks);
-  const [drag, setDrag] = useState<string | null>(null);
-  const deps = dependencies && { all: all ?? tasks, canWrite: dependencies.canWrite, drag, setDrag };
+  const [ownDrag, setOwnDrag] = useState<string | null>(null);
+  const deps = dependencies && {
+    all: all ?? tasks,
+    canWrite: dependencies.canWrite,
+    drag: dependencies.setDrag ? (dependencies.drag ?? null) : ownDrag,
+    setDrag: dependencies.setDrag ?? setOwnDrag,
+  };
   return (
-    <ul className="task-list">
+    <ul className="task-list" aria-label={label}>
       {nestTasks(tasks).map(({ task, children }) => [
         <TaskRow key={task.id} task={task} today={today} onOpen={onOpen} subtasks={counts.get(task.id)} quick={quick} deps={deps} />,
         ...children.map((c) => <TaskRow key={c.id} task={c} today={today} onOpen={onOpen} nested quick={quick} deps={deps} />),
@@ -376,18 +383,98 @@ interface Detail {
   subtasks: Task[];
 }
 
+const FORM_ID = "task-form";
+const STATUS_TONE: Record<Status, string> = { todo: "neutral", doing: "info", blocked: "alerta", done: "ok" };
+const PRIORITY_ORDER: Priority[] = ["low", "medium", "high", "urgent"];
+const DAY_MS = 86_400_000;
+const localToday = () => {
+  const n = new Date();
+  return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, "0")}-${String(n.getDate()).padStart(2, "0")}`;
+};
+const daysBetween = (a: string, b: string) => Math.round((Date.parse(b) - Date.parse(a)) / DAY_MS);
+const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+
+/** Resumo das datas em linguagem de gente: duração e quanto falta para o prazo. */
+function scheduleSummary(start: string | null | undefined, due: string | null | undefined, status: Status | undefined, today: string) {
+  const parts: { text: string; tone?: string }[] = [];
+  if (start && due && start <= due) parts.push({ text: `Duração: ${plural(daysBetween(start, due) + 1, "dia", "dias")}` });
+  if (due && status !== "done") {
+    const left = daysBetween(today, due);
+    if (left < 0) parts.push({ text: `Venceu há ${plural(-left, "dia", "dias")}`, tone: "alerta" });
+    else if (left === 0) parts.push({ text: "Vence hoje", tone: "warn" });
+    else parts.push({ text: `Vence em ${plural(left, "dia", "dias")}`, tone: left <= 3 ? "warn" : undefined });
+  }
+  return parts;
+}
+
+/** Tags como fichas: vírgula ou Enter cria a ficha; Backspace no campo vazio tira a última.
+ * O texto ainda não confirmado fica com quem chama, para entrar no salvamento. */
+function TagInput({ id, tags, text, disabled, onTags, onText }: { id: string; tags: string[]; text: string; disabled: boolean; onTags: (t: string[]) => void; onText: (s: string) => void }) {
+  const commit = (raw: string[]) => {
+    const fresh = raw.map(normTag).filter(Boolean);
+    if (fresh.length) onTags([...new Set([...tags.map(normTag), ...fresh])]);
+  };
+  return (
+    <div className={`tag-input${disabled ? " is-disabled" : ""}`}>
+      {tags.filter((x) => x.trim()).map((tag) => (
+        <span key={tag} className="badge task-tag tag-chip">
+          {tag}
+          {!disabled && (
+            <button type="button" aria-label={`Remover tag ${tag}`} onClick={() => onTags(tags.filter((x) => x !== tag))}>
+              <X size={12} aria-hidden />
+            </button>
+          )}
+        </span>
+      ))}
+      <input
+        id={id}
+        className="tag-input-field"
+        value={text}
+        disabled={disabled}
+        form={FORM_ID}
+        placeholder={tags.length ? "Adicionar…" : "Ex.: DOCUMENTAÇÃO, REVISÃO"}
+        aria-describedby={`${id}-help`}
+        onChange={(e) => {
+          const parts = e.target.value.split(",");
+          if (parts.length > 1) commit(parts.slice(0, -1));
+          onText(parts[parts.length - 1]);
+        }}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" && text.trim()) {
+            e.preventDefault();
+            commit([text]);
+            onText("");
+          } else if (e.key === "Backspace" && !text && tags.length) onTags(tags.slice(0, -1));
+        }}
+        onBlur={() => text.trim() && (commit([text]), onText(""))}
+      />
+    </div>
+  );
+}
+
+/** Linha de propriedade da coluna lateral: rótulo com ícone em cima, controle embaixo. */
+function Prop({ icon, label, htmlFor, children }: { icon: ReactNode; label: string; htmlFor?: string; children: ReactNode }) {
+  return (
+    <div className="task-prop">
+      {htmlFor ? <label htmlFor={htmlFor}>{icon} {label}</label> : <span className="label">{icon} {label}</span>}
+      {children}
+    </div>
+  );
+}
+
 export function TaskDialog({ taskId, members, onClose }: { taskId: string; members?: Member[]; onClose: () => void }) {
   const q = useQuery({ queryKey: ["task", taskId], queryFn: () => api.get<Detail>(`/tasks/${taskId}`) });
   const update = useUpdateTask();
   const del = useDeleteTask();
   const toast = useToast();
   const { openAssistant } = useAssistant();
-  const [draft, setDraft] = useState<Partial<Task> & { moreOpen?: boolean }>({});
+  const [draft, setDraft] = useState<Partial<Task>>({});
+  const [tagText, setTagText] = useState("");
 
   const d = q.data;
   const t = d?.task;
   const val = <K extends keyof Task>(k: K): Task[K] | undefined => (k in draft ? (draft[k] as Task[K]) : t?.[k]);
-  // Candidatas a tarefa-mãe: tarefas principais do mesmo projeto (só carrega ao abrir os detalhes).
+  const set = (patch: Partial<Task>) => setDraft((cur) => ({ ...cur, ...patch }));
   const subtasks = d?.subtasks ?? [];
   const canNest = !!t?.project_id && !!d?.can_write && !subtasks.length;
   // Tarefas do projeto: candidatas a tarefa-mãe e a dependência (na página do projeto já estão em cache).
@@ -400,11 +487,10 @@ export function TaskDialog({ taskId, members, onClose }: { taskId: string; membe
   // A tela mostra horas; o servidor guarda minutos.
   const minutes = val("estimate_minutes");
   const estimateHours = minutes == null ? null : minutes / 60;
-  const setEstimateHours = (v: string) =>
-    setDraft({ ...draft, estimate_minutes: v === "" ? null : Math.round(Number(v) * 60) });
   // Sprint: só tarefa principal de projeto (subtarefa acompanha a mãe, regra do servidor).
   const sprintsQ = useSprints(t?.project_id, !!t?.project_id && !t?.parent_id);
   const sprintOptions = (sprintsQ.data?.sprints ?? []).filter((s) => s.status !== "closed" || s.id === t?.sprint_id);
+  const phaseOptions = usePhases(t?.project_id, !!t?.project_id).data?.phases ?? [];
 
   // Excluir a mãe não apaga as subtarefas (migração 011): o aviso diz isso em vez de "não pode ser desfeito".
   const confirmDelete = (id: string) => {
@@ -419,163 +505,198 @@ export function TaskDialog({ taskId, members, onClose }: { taskId: string; membe
   const startVal = val("start_date");
   const dueVal = val("due_date");
   const datesInverted = !!startVal && !!dueVal && startVal > dueVal;
+  const summary = scheduleSummary(startVal, dueVal, val("status"), localToday());
 
-  const save = (e: FormEvent) => {
-    e.preventDefault();
-    if (!t || datesInverted) return;
-    const { moreOpen, ...patch } = draft;
-    void moreOpen;
-    if (patch.labels) patch.labels = [...new Set(patch.labels.map(normTag).filter(Boolean))];
+  const dirty = Object.keys(draft).length > 0 || !!tagText.trim();
+  // Fechar sem querer (Esc, clique fora, X) descartava o que a pessoa digitou sem avisar.
+  const dirtyRef = useRef(dirty);
+  dirtyRef.current = dirty;
+  const close = useCallback(() => {
+    if (dirtyRef.current && !confirm("Descartar as alterações não salvas desta tarefa?")) return false;
+    onClose();
+    return true;
+  }, [onClose]);
+
+  const save = (e?: FormEvent) => {
+    e?.preventDefault();
+    if (!t || datesInverted || update.isPending) return;
+    const patch = { ...draft };
+    const pending = tagText.split(",").map(normTag).filter(Boolean);
+    if (pending.length) patch.labels = [...(patch.labels ?? t.labels), ...pending];
+    if (patch.labels) {
+      patch.labels = [...new Set(patch.labels.map(normTag).filter(Boolean))];
+      if (patch.labels.join("\n") === t.labels.join("\n")) delete patch.labels;
+    }
     if (!Object.keys(patch).length) return onClose();
     update.mutate({ task: t, patch }, { onSuccess: () => (toast("Tarefa salva"), onClose()) });
   };
 
+  const ro = !d?.can_write;
   return (
-    <Dialog title="Tarefa" onClose={onClose}>
-      {q.isError && <ErrorBox error={q.error} onRetry={() => q.refetch()} />}
+    <Dialog title="Tarefa" onClose={close} className="task-dialog">
+      {q.isError && <div className="task-dialog-body"><ErrorBox error={q.error} onRetry={() => q.refetch()} /></div>}
+      {!t && !q.isError && <div className="task-dialog-body"><p className="muted">Carregando tarefa…</p></div>}
       {t && d && (
         <>
-        <form onSubmit={save}>
-          {t.parent_id && (
-            <p className="muted subtask-of"><CornerDownRight size={14} aria-hidden /> Subtarefa de <strong>{t.parent_title}</strong></p>
-          )}
-          <div className="field">
-            <label htmlFor="t-title">Título</label>
-            <input id="t-title" data-autofocus className="input" value={val("title") ?? ""} disabled={!d.can_write} maxLength={200} onChange={(e) => setDraft({ ...draft, title: e.target.value })} />
-          </div>
-          <div className="row">
-            <div className="field grow">
-              <label htmlFor="t-status">Estado</label>
-              <select id="t-status" className="select" value={val("status")} disabled={!d.can_write} onChange={(e) => setDraft({ ...draft, status: e.target.value as Status })}>
-                {STATUSES.map((s) => (
-                  <option key={s} value={s}>
-                    {STATUS_LABEL[s]}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="field grow">
-              <label htmlFor="t-start">Início</label>
-              <input id="t-start" type="date" className="input" value={val("start_date") ?? ""} max={val("due_date") ?? undefined} disabled={!d.can_write || !!linkedBy} aria-describedby={[linkedBy && "t-start-linked", datesInverted && "t-dates-error"].filter(Boolean).join(" ") || undefined} onChange={(e) => setDraft({ ...draft, start_date: e.target.value || null })} />
-            </div>
-            <div className="field grow">
-              <label htmlFor="t-due">Prazo</label>
-              <input id="t-due" type="date" className="input" value={val("due_date") ?? ""} min={val("start_date") ?? undefined} disabled={!d.can_write} aria-describedby={datesInverted ? "t-dates-error" : undefined} onChange={(e) => setDraft({ ...draft, due_date: e.target.value || null })} />
-            </div>
-          </div>
-          {linkedBy && (
-            <p id="t-start-linked" className="muted start-linked">
-              <Link2 size={13} aria-hidden /> Início automático: no dia seguinte ao prazo de <strong>{linkedBy.title}</strong> ({fmtDate(linkedBy.due_date)}). Se esse prazo mudar, esta tarefa anda junto e mantém a duração.
-            </p>
-          )}
-          {datesInverted && <p id="t-dates-error" className="form-error" role="alert">O início fica depois do prazo. Antecipe o início ou adie o prazo.</p>}
-          {t.project_id && members && (
-            <div className="field">
-              <label htmlFor="t-assignee">Responsável</label>
-              <select id="t-assignee" className="select" value={val("assignee_id") ?? ""} disabled={!d.can_write} onChange={(e) => setDraft({ ...draft, assignee_id: e.target.value || null })}>
-                <option value="">Sem responsável</option>
-                {members.map((m) => (
-                  <option key={m.id} value={m.id}>
-                    {m.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-          )}
-          <div className="row">
-            <div className="field grow">
-              <label htmlFor="t-prio">Prioridade</label>
-              <select id="t-prio" className="select" value={val("priority")} disabled={!d.can_write} onChange={(e) => setDraft({ ...draft, priority: e.target.value as Priority })}>
-                {(Object.keys(PRIORITY_LABEL) as Priority[]).map((p) => (
-                  <option key={p} value={p}>
-                    {PRIORITY_LABEL[p]}
-                  </option>
-                ))}
-              </select>
-            </div>
-            {t.project_id && (
-              <div className="field grow">
-                {t.parent_id ? <span className="label">Sprint</span> : <label htmlFor="t-sprint">Sprint</label>}
-                {t.parent_id ? (
-                  <p className="muted">{t.sprint_name ?? "Backlog"} (acompanha a tarefa-mãe)</p>
-                ) : (
-                  <select id="t-sprint" className="select" value={val("sprint_id") ?? ""} disabled={!d.can_write} onChange={(e) => setDraft({ ...draft, sprint_id: e.target.value || null })}>
-                    <option value="">Backlog (sem sprint)</option>
-                    {t.sprint_id && !sprintOptions.some((s) => s.id === t.sprint_id) && <option value={t.sprint_id}>{t.sprint_name}</option>}
-                    {sprintOptions.map((s) => <option key={s.id} value={s.id} disabled={s.status === "closed"}>{s.name}{s.status === "active" ? " (em andamento)" : s.status === "closed" ? " (encerrada)" : ""}</option>)}
-                  </select>
-                )}
-              </div>
-            )}
-          </div>
-          <div className="field">
-            <label htmlFor="t-labels">Tags</label>
-            <input id="t-labels" className="input" value={(val("labels") ?? []).join(",")} disabled={!d.can_write} placeholder="Ex.: DOCUMENTAÇÃO, REVISÃO" aria-describedby="t-labels-help" onChange={(e) => setDraft({ ...draft, labels: e.target.value.split(",") })} />
-            <small id="t-labels-help" className="muted">Separe por vírgulas. A prioridade aparece automaticamente como etiqueta.</small>
-          </div>
-          <button type="button" className="btn btn-ghost" aria-expanded={!!draft.moreOpen} onClick={() => setDraft({ ...draft, moreOpen: !draft.moreOpen })}>
-            {draft.moreOpen ? "Menos detalhes" : "Mais detalhes (descrição, estimativa, tarefa-mãe)"}
-          </button>
-          {draft.moreOpen && (
-            <div style={{ marginTop: 12 }}>
-              <div className="row">
-                <div className="field grow">
-                  <label htmlFor="t-est">Estimativa (horas)</label>
-                  <input
-                    id="t-est"
-                    type="number"
-                    min={0}
-                    step={0.5}
-                    className="input"
-                    disabled={!d.can_write}
-                    value={estimateHours ?? ""}
-                    onChange={(e) => setEstimateHours(e.target.value)}
-                  />
-                </div>
-              </div>
-              <div className="field">
-                <label htmlFor="t-desc">Descrição</label>
-                <textarea id="t-desc" className="textarea" value={val("description") ?? ""} disabled={!d.can_write} onChange={(e) => setDraft({ ...draft, description: e.target.value })} />
-              </div>
-              {canNest && (
-                <div className="field">
-                  <label htmlFor="t-parent">Tarefa-mãe</label>
-                  <select id="t-parent" className="select" value={val("parent_id") ?? ""} onChange={(e) => setDraft({ ...draft, parent_id: e.target.value || null })}>
-                    <option value="">Nenhuma (tarefa principal)</option>
-                    {t.parent_id && !parents.some((x) => x.id === t.parent_id) && <option value={t.parent_id}>{t.parent_title}</option>}
-                    {parents.map((x) => <option key={x.id} value={x.id}>{x.title}</option>)}
-                  </select>
-                </div>
+          {/* Ctrl/⌘+Enter salva de qualquer campo, inclusive da descrição. */}
+          {/* eslint-disable-next-line jsx-a11y/no-static-element-interactions */}
+          <div className="task-dialog-body" onKeyDown={(e) => {
+            // Comentários e subtarefas têm envio próprio; o atalho vale só para os campos da ficha.
+            if (!d.can_write || e.key !== "Enter" || !(e.metaKey || e.ctrlKey) || (e.target as HTMLElement).closest(".task-section")) return;
+            e.preventDefault();
+            save();
+          }}>
+            <div className="task-context">
+              {t.project_name ? <span className="badge"><Folder size={12} aria-hidden /> {t.project_name}</span> : <span className="badge">Pessoal</span>}
+              {t.is_milestone && <span className="badge warn"><Diamond size={12} aria-hidden /> Marco</span>}
+              {t.parent_id && (
+                <span className="subtask-of muted"><CornerDownRight size={14} aria-hidden /> Subtarefa de <strong>{t.parent_title}</strong></span>
               )}
             </div>
-          )}
-          <div className="row" style={{ marginTop: 16 }}>
-            {d.can_write && (
-              <button className="btn btn-primary" disabled={update.isPending || datesInverted}>
-                Salvar
-              </button>
+            <label className="sr-only" htmlFor="t-title">Título</label>
+            <input id="t-title" data-autofocus className="task-title-input" form={FORM_ID} value={val("title") ?? ""} disabled={ro} maxLength={200} placeholder="Título da tarefa" onChange={(e) => set({ title: e.target.value })} />
+
+            <fieldset className="segmented segmented-status" disabled={ro}>
+              <legend className="sr-only">Estado</legend>
+              {STATUSES.map((s) => (
+                <label key={s} className={`seg seg-${STATUS_TONE[s]}`}>
+                  <input type="radio" name="t-status" value={s} checked={val("status") === s} onChange={() => set({ status: s })} />
+                  <span>{s === "done" && <Check size={14} aria-hidden />}{STATUS_LABEL[s]}</span>
+                </label>
+              ))}
+            </fieldset>
+
+            <div className="task-columns">
+              <div className="task-main">
+                <div className="field">
+                  <label htmlFor="t-desc">Descrição</label>
+                  <textarea id="t-desc" className="textarea task-desc" value={val("description") ?? ""} disabled={ro} placeholder={ro ? "Sem descrição." : "Contexto, critério de pronto, links úteis…"} onChange={(e) => set({ description: e.target.value })} />
+                </div>
+                {!t.parent_id && <Subtasks parent={t} items={subtasks} canWrite={d.can_write} />}
+                {t.project_id && <Dependencies detail={d} start={startVal ?? dueVal ?? null} projectTasks={siblings.data?.tasks} />}
+                <Comments taskId={t.id} canWrite={d.can_comment} />
+              </div>
+
+              <aside className="task-aside" aria-label="Propriedades da tarefa">
+                {t.project_id && members && (
+                  <Prop icon={<UserRound size={14} aria-hidden />} label="Responsável" htmlFor="t-assignee">
+                    <select id="t-assignee" className="select" value={val("assignee_id") ?? ""} disabled={ro} onChange={(e) => set({ assignee_id: e.target.value || null })}>
+                      <option value="">Sem responsável</option>
+                      {members.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+                    </select>
+                  </Prop>
+                )}
+
+                <Prop icon={<Flag size={14} aria-hidden />} label="Prioridade">
+                  <fieldset className="segmented segmented-prio" disabled={ro}>
+                    <legend className="sr-only">Prioridade</legend>
+                    {PRIORITY_ORDER.map((p) => (
+                      <label key={p} className={`seg seg-prio-${p}`}>
+                        <input type="radio" name="t-prio" value={p} checked={val("priority") === p} onChange={() => set({ priority: p })} />
+                        <span>{PRIORITY_LABEL[p]}</span>
+                      </label>
+                    ))}
+                  </fieldset>
+                </Prop>
+
+                <Prop icon={<CalendarDays size={14} aria-hidden />} label="Datas">
+                  <div className="task-dates">
+                    <div className="field">
+                      <label htmlFor="t-start">Início</label>
+                      <input id="t-start" type="date" className="input" value={startVal ?? ""} max={dueVal ?? undefined} disabled={ro || !!linkedBy} aria-describedby={[linkedBy && "t-start-linked", datesInverted && "t-dates-error"].filter(Boolean).join(" ") || undefined} onChange={(e) => set({ start_date: e.target.value || null })} />
+                    </div>
+                    <ArrowRight size={16} aria-hidden className="task-dates-arrow" />
+                    <div className="field">
+                      <label htmlFor="t-due">Prazo</label>
+                      <input id="t-due" type="date" className="input" value={dueVal ?? ""} min={startVal ?? undefined} disabled={ro} aria-describedby={datesInverted ? "t-dates-error" : undefined} onChange={(e) => set({ due_date: e.target.value || null })} />
+                    </div>
+                  </div>
+                  {summary.length > 0 && !datesInverted && (
+                    <p className="task-dates-summary">{summary.map((s) => <span key={s.text} className={`badge ${s.tone ?? ""}`}>{s.text}</span>)}</p>
+                  )}
+                  {datesInverted && <p id="t-dates-error" className="form-error" role="alert">O início fica depois do prazo. Antecipe o início ou adie o prazo.</p>}
+                  {linkedBy && (
+                    <p id="t-start-linked" className="start-linked muted">
+                      <Link2 size={13} aria-hidden /> <span>Início automático: no dia seguinte ao prazo de <strong>{linkedBy.title}</strong> ({fmtDate(linkedBy.due_date)}). Se esse prazo mudar, esta tarefa anda junto e mantém a duração.</span>
+                    </p>
+                  )}
+                </Prop>
+
+                {t.project_id && (phaseOptions.length > 0 || t.phase) && (
+                  <Prop icon={<Layers size={14} aria-hidden />} label="Fase" htmlFor={t.parent_id ? undefined : "t-phase"}>
+                    {t.parent_id ? (
+                      <p className="muted task-prop-fixed">{t.phase ?? "Sem fase"} · acompanha a tarefa-mãe</p>
+                    ) : (
+                      <select id="t-phase" className="select" value={val("phase") ?? ""} disabled={ro} onChange={(e) => set({ phase: e.target.value || null })}>
+                        <option value="">Sem fase</option>
+                        {t.phase && !phaseOptions.some((p) => p.name === t.phase) && <option value={t.phase}>{t.phase}</option>}
+                        {phaseOptions.map((p) => <option key={p.id} value={p.name}>{p.name}</option>)}
+                      </select>
+                    )}
+                  </Prop>
+                )}
+
+                {t.project_id && (
+                  <Prop icon={<Repeat size={14} aria-hidden />} label="Sprint" htmlFor={t.parent_id ? undefined : "t-sprint"}>
+                    {t.parent_id ? (
+                      <p className="muted task-prop-fixed">{t.sprint_name ?? "Backlog"} · acompanha a tarefa-mãe</p>
+                    ) : (
+                      <select id="t-sprint" className="select" value={val("sprint_id") ?? ""} disabled={ro} onChange={(e) => set({ sprint_id: e.target.value || null })}>
+                        <option value="">Backlog (sem sprint)</option>
+                        {t.sprint_id && !sprintOptions.some((s) => s.id === t.sprint_id) && <option value={t.sprint_id}>{t.sprint_name}</option>}
+                        {sprintOptions.map((s) => <option key={s.id} value={s.id} disabled={s.status === "closed"}>{s.name}{s.status === "active" ? " (em andamento)" : s.status === "closed" ? " (encerrada)" : ""}</option>)}
+                      </select>
+                    )}
+                  </Prop>
+                )}
+
+                <Prop icon={<Timer size={14} aria-hidden />} label="Estimativa (horas)" htmlFor="t-est">
+                  <input id="t-est" type="number" min={0} step={0.5} inputMode="decimal" className="input" form={FORM_ID} disabled={ro} placeholder="Ex.: 4" value={estimateHours ?? ""} onChange={(e) => set({ estimate_minutes: e.target.value === "" ? null : Math.round(Number(e.target.value) * 60) })} />
+                </Prop>
+
+                {canNest && (
+                  <Prop icon={<CornerDownRight size={14} aria-hidden />} label="Tarefa-mãe" htmlFor="t-parent">
+                    <select id="t-parent" className="select" value={val("parent_id") ?? ""} onChange={(e) => set({ parent_id: e.target.value || null })}>
+                      <option value="">Nenhuma (tarefa principal)</option>
+                      {t.parent_id && !parents.some((x) => x.id === t.parent_id) && <option value={t.parent_id}>{t.parent_title}</option>}
+                      {parents.map((x) => <option key={x.id} value={x.id}>{x.title}</option>)}
+                    </select>
+                  </Prop>
+                )}
+
+                <Prop icon={<Tag size={14} aria-hidden />} label="Tags" htmlFor="t-labels">
+                  <TagInput id="t-labels" tags={val("labels") ?? []} text={tagText} disabled={ro} onTags={(labels) => set({ labels })} onText={setTagText} />
+                  <small id="t-labels-help" className="muted">Vírgula ou Enter adiciona. A prioridade já aparece como etiqueta.</small>
+                </Prop>
+              </aside>
+            </div>
+          </div>
+
+          <form id={FORM_ID} className="task-dialog-footer" onSubmit={save}>
+            {ro ? (
+              <p className="muted task-footer-note">Você tem acesso somente de leitura a esta tarefa.</p>
+            ) : (
+              <p className={`task-footer-note ${dirty ? "is-dirty" : "muted"}`} aria-live="polite">{dirty ? "Alterações não salvas" : "Nenhuma alteração"}</p>
             )}
-            <button type="button" className="btn btn-line" onClick={onClose}>
-              {d.can_write ? "Cancelar" : "Fechar"}
-            </button>
-            <span style={{ flex: 1 }} />
             {d.can_comment && (
               // Para quem prefere escrever: o assistente prepara o comentário e só publica após confirmação.
-              <button type="button" className="btn btn-ghost btn-sm" onClick={() => (onClose(), openAssistant(`Comente na tarefa ${t.title}: `))}>
+              <button type="button" className="btn btn-ghost btn-sm" onClick={() => close() && openAssistant(`Comente na tarefa ${t.title}: `)}>
                 <MessageCircle size={15} aria-hidden /> Contar ao assistente
               </button>
             )}
             {d.can_write && (
-              <button type="button" className="btn btn-danger btn-sm" onClick={() => confirmDelete(t.id)}>
-                Excluir
+              <button type="button" className="btn btn-ghost btn-sm task-delete" onClick={() => confirmDelete(t.id)}>
+                <Trash2 size={15} aria-hidden /> Excluir
               </button>
             )}
-          </div>
-          {!d.can_write && <p className="muted" style={{ marginTop: 10 }}>Você tem acesso somente de leitura a esta tarefa.</p>}
-        </form>
-        {t.project_id && <Dependencies detail={d} start={val("start_date") ?? val("due_date") ?? null} projectTasks={siblings.data?.tasks} />}
-        {!t.parent_id && <Subtasks parent={t} items={subtasks} canWrite={d.can_write} />}
-        <Comments taskId={t.id} canWrite={d.can_comment} />
+            <span className="task-footer-spacer" />
+            <button type="button" className="btn btn-line" onClick={() => close()}>{d.can_write ? "Cancelar" : "Fechar"}</button>
+            {d.can_write && (
+              <button className="btn btn-primary" disabled={update.isPending || datesInverted || !dirty} title="Ctrl+Enter">
+                {update.isPending ? "Salvando…" : "Salvar"}
+              </button>
+            )}
+          </form>
         </>
       )}
     </Dialog>

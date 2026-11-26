@@ -12,7 +12,7 @@ function AuthShell({ title, children, foot }: { title: string; children: React.R
       <div className="auth-card">
         <div className="auth-theme"><ThemeToggle /></div>
         <div className="brand">
-          <Logo height={40} /> <span className="brand-name">Projeta</span>
+          <Logo height={40} />
         </div>
         <h1>{title}</h1>
         {children}

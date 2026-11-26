@@ -49,7 +49,7 @@ export function AppLayout() {
       <a href="#main" className="skip-link">Pular para o conteúdo</a>
       <div className="scroll-progress" aria-hidden="true" />
       <aside className="nav" aria-label="Navegação principal">
-        <NavLink to="/" className="brand" aria-label="Terracap Projeta — início"><Logo /> <span className="brand-name">Projeta</span></NavLink>
+        <NavLink to="/" className="brand" aria-label="Terracap Projeta — início"><Logo /></NavLink>
         <nav className="nav-links">
           {LINKS.map(({ to, label, full, icon: Icon, end }) => (
             <NavLink key={to} to={to} end={end}><Icon size={20} aria-hidden /> {full ?? label}</NavLink>

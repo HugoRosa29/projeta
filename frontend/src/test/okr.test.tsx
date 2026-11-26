@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { NO_KR_FILTER, boardStats, fmtCost, cheer, filterBoard, isLead, objectiveSummary, periodLabel, progressOf, since, staleByOwner, type KeyResult, type MyOkrs, type Objective, type OkrBoard as Board } from "../domain/okr";
 import { CheckinDialog } from "../features/okrs/CheckinDialog";
 import { OkrBoard } from "../features/okrs/OkrBoard";
-import { MyCheckins } from "../features/okrs/OkrCards";
+import { MyCheckins, OkrPulse } from "../features/okrs/OkrCards";
 import { nextPeriods } from "../features/okrs/OkrEditors";
 import { api } from "../services/api";
 
@@ -155,6 +155,7 @@ const board = (objectives: Objective[]): Board => ({
   can_manage: true,
   objectives,
   summary: { objectives: objectives.length, key_results: 3, progress: 45, confidence: { on_track: 2, at_risk: 1, off_track: 0 }, stale: 1, behind_pace: 0, updated_this_week: 2, without_owner: 0, cost: 0 },
+  received: { objectives: [], summary: { objectives: 0, key_results: 0, progress: 0, confidence: { on_track: 0, at_risk: 0, off_track: 0 }, stale: 0, behind_pace: 0, updated_this_week: 0, without_owner: 0, cost: 0 } },
 });
 
 describe("quadro de OKRs: regras", () => {
@@ -218,6 +219,11 @@ describe("quadro de OKRs: tela", () => {
     expect(screen.queryByRole("button", { name: /^Editar/ })).not.toBeInTheDocument();
   });
 
+  it("objetivo recebido pelo organograma mostra a origem", () => {
+    wrap(<OkrBoard d={{ ...board([obj({ shared_from: "DISID" })]), can_manage: false }} onCheckin={() => {}} />);
+    expect(screen.getByText("de DISID")).toBeInTheDocument();
+  });
+
   it("recolhe o grupo e troca para o gráfico", async () => {
     const user = userEvent.setup();
     wrap(<OkrBoard d={board([obj()])} onCheckin={() => {}} />);
@@ -226,5 +232,37 @@ describe("quadro de OKRs: tela", () => {
     await user.click(screen.getByRole("button", { name: /Gráfico/ }));
     expect(screen.getByRole("heading", { name: "Progresso por objetivo" })).toBeInTheDocument();
     expect(screen.getByText("Quem precisa atualizar")).toBeInTheDocument();
+  });
+});
+
+describe("card de OKRs da home", () => {
+  const shared = obj({ id: "o9", title: "Sistemas sem fila", progress: 20, shared_from: "DISID" });
+  const withReceived = (b: Board): Board => ({
+    ...b,
+    received: { objectives: [shared], summary: { ...b.summary, objectives: 1, key_results: 2, progress: 20, confidence: { on_track: 0, at_risk: 1, off_track: 1 }, updated_this_week: 1 } },
+  });
+
+  it("soma próprios e recebidos num panorama só, sem separar a origem", async () => {
+    vi.spyOn(api, "get").mockResolvedValue(withReceived(board([obj({ progress: 40 })])));
+    wrap(<OkrPulse workspaceId="w1" />);
+    expect(await screen.findByText("30%")).toBeInTheDocument();
+    expect(screen.getByText(/2 objetivos, 5 resultados-chave/)).toBeInTheDocument();
+    expect(screen.getByText("3 de 5")).toBeInTheDocument();
+    expect(screen.queryByText("DISID")).not.toBeInTheDocument();
+    expect(screen.queryByText("Sistemas sem fila")).not.toBeInTheDocument();
+  });
+
+  it("só com recebidos, mostra o panorama em vez do convite", async () => {
+    vi.spyOn(api, "get").mockResolvedValue(withReceived(board([])));
+    wrap(<OkrPulse workspaceId="w1" />);
+    expect(await screen.findByText("20%")).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Definir OKRs" })).not.toBeInTheDocument();
+  });
+
+  it("sem próprio, sem recebido e sem convite, não ocupa a home", async () => {
+    const get = vi.spyOn(api, "get").mockResolvedValue(board([]));
+    const { container } = wrap(<OkrPulse workspaceId="w1" suggest={false} />);
+    await vi.waitFor(() => expect(get).toHaveBeenCalled());
+    expect(container).toBeEmptyDOMElement();
   });
 });

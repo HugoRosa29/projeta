@@ -1,4 +1,4 @@
-/* Panorama da home em formato de quadro, enxuto: números no topo e projetos em grupos
+/* Panorama em formato de quadro (portfólio), enxuto: números no topo e projetos em grupos
    recolhíveis, uma linha cada. Cor só onde pede atenção; o resto fica em tons neutros. */
 .pn-head { display: flex; align-items: center; justify-content: space-between; gap: 8px 16px; flex-wrap: wrap; margin-bottom: 10px; }
 .pn-title { display: flex; align-items: baseline; flex-wrap: wrap; gap: 2px 10px; min-width: 0; }
@@ -86,6 +86,137 @@
 @container pn (max-width: 520px) { .pn-c-health, .pn-c-tl { display: none; } .pn-tools { width: 100%; } }
 @media (forced-colors: active) { .pn-bat-fill, .pn-pill, .pn-label, .pn-mix > span { forced-color-adjust: none; border: 1px solid CanvasText; } }
 
+/* Panorama da home em blocos: um cartão por área, cada projeto numa barra na cor da situação
+   (as mesmas .g-* do quadro). O nome e o % acompanham a barra, então a cor nunca é o único sinal. */
+.ab { container: ab / inline-size; }
+/* Coluna estreita: o subtítulo sai para título, legenda e link caberem numa linha só. */
+@container ab (max-width: 900px) { .ab .pn-title p { display: none; } }
+.ab-legend { display: flex; gap: 12px; margin: 0; padding: 0; list-style: none; font-size: 0.75rem; color: var(--ink-60); }
+.ab-legend li { display: inline-flex; align-items: center; gap: 5px; }
+.ab-legend li::before { content: ""; width: 10px; height: 10px; border-radius: 2px; background: var(--g); }
+/* auto-fit: o número de colunas segue a largura disponível (inclusive com o assistente aberto) e
+   os blocos se esticam para ocupar a linha, sem colunas vazias quando há poucas áreas. */
+.ab-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr)); gap: 12px; align-content: start; }
+.ab-block { display: flex; flex-direction: column; min-width: 0; padding: 14px 16px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--surface); }
+.ab-head { margin-bottom: 10px; padding-bottom: 8px; border-bottom: 1px solid var(--line); }
+.ab-title-row { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; }
+.ab-title-row h3 { margin: 0 auto 0 0; }
+.ab-head h3 { font-size: 1.0625rem; }
+.ab-head h3 a { color: var(--ink); text-decoration: none; }
+.ab-head h3 a:hover { color: var(--azul); text-decoration: underline; }
+.ab-own { font-size: 0.75rem; font-weight: 400; }
+/* Ícone de pasta antes do nome do bloco: distingue pasta de unidade do organograma. */
+.ab-folder { flex: none; margin-right: 5px; vertical-align: -2px; color: var(--ink-60); }
+
+/* Diálogo "Pastas de projetos". */
+.fd-dialog { max-width: 620px; }
+.fd-intro { margin: 0 0 12px; font-size: 0.875rem; }
+.fd-new, .fd-rename { display: flex; gap: 8px; align-items: center; }
+.fd-new { margin-bottom: 12px; }
+.fd-rename { flex: 1; }
+.fd-rename .input, .fd-new .input { min-height: 36px; padding: 6px 12px; }
+.fd-folders, .fd-projects { list-style: none; margin: 0; padding: 0; }
+.fd-folder { display: flex; align-items: center; gap: 8px; min-height: 42px; padding: 4px 0; border-bottom: 1px solid var(--line); font-size: 0.875rem; }
+.fd-folder-name { margin-right: auto; overflow-wrap: anywhere; }
+.fd-sub { margin: 18px 0 8px; font-size: 0.9375rem; }
+.fd-projects { max-height: 340px; overflow-y: auto; }
+.fd-project { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 5px 0; border-bottom: 1px solid var(--line); font-size: 0.8125rem; }
+.fd-project label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fd-project .pn-select { flex: none; width: 190px; max-width: 45%; }
+.ab-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin: 2px 0 0; font-size: 0.8125rem; color: var(--ink-60); font-variant-numeric: tabular-nums; }
+.ab-alert { padding: 0 7px; border-radius: 999px; background: color-mix(in srgb, var(--g) 14%, var(--surface)); color: color-mix(in srgb, var(--g) 80%, var(--ink)); font-size: 0.75rem; font-weight: 600; }
+/* Projetos em mini-blocos dentro do bloco da área; quantos cabem por linha segue a largura.
+   Área com muitos projetos rola por dentro: os blocos ficam com alturas parecidas. */
+.ab-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 150px), 1fr)); gap: 8px; align-content: start; margin: 0; padding: 0 2px 0 0; list-style: none; max-height: 360px; overflow-y: auto; }
+.ab-item { position: relative; min-width: 0; border: 1px solid var(--line); border-radius: var(--radius-sm, 10px); background: var(--paper); box-shadow: inset 0 3px 0 var(--g); font-size: 0.8125rem; transition: background 0.15s, border-color 0.15s; }
+.ab-tile { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; }
+.ab-item:hover { background: var(--paper-deep); border-color: color-mix(in srgb, var(--g) 45%, var(--line)); }
+.ab-name { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; min-height: 2.6em; line-height: 1.3; font-weight: 600; color: var(--ink); text-decoration: none; }
+/* O link cobre o mini-bloco inteiro: clicar em qualquer ponto abre o projeto. */
+.ab-name::after { content: ""; position: absolute; inset: 0; border-radius: inherit; }
+.ab-name:hover { color: var(--azul); }
+.ab-from { font: 600 0.6875rem/1.2 var(--mono); letter-spacing: 0.04em; color: var(--ink-60); }
+.ab-name:focus-visible { outline: none; }
+.ab-item:has(.ab-name:focus-visible) { outline: 2px solid var(--azul); outline-offset: 2px; }
+.ab-bar { display: block; height: 10px; border-radius: 999px; background: color-mix(in srgb, var(--g) 16%, var(--surface)); overflow: hidden; }
+.ab-bar > span { display: block; height: 100%; min-width: 4px; border-radius: inherit; background: var(--g); transition: width 0.4s var(--ease, ease); }
+.ab-pct { display: flex; justify-content: space-between; align-items: baseline; gap: 6px; font-variant-numeric: tabular-nums; }
+.ab-pct strong { font-size: 0.9375rem; color: var(--ink); }
+.ab-health { font-size: 0.75rem; font-weight: 600; color: color-mix(in srgb, var(--g) 80%, var(--ink)); }
+/* Expandir uma área: botão discreto no cabeçalho; aparece mais forte ao passar o mouse. */
+.ab-toggle { flex: none; display: inline-grid; place-items: center; width: 26px; height: 26px; padding: 0; border: 0; border-radius: 8px; background: transparent; color: var(--ink-60); cursor: pointer; transition: background 0.2s, color 0.2s, transform 0.2s cubic-bezier(0.32, 0.72, 0, 1); }
+.ab-toggle:hover { background: var(--paper-deep); color: var(--ink); transform: scale(1.06); }
+.ab-toggle:active { transform: scale(0.94); }
+.ab-toggle:focus-visible { outline: 2px solid var(--azul); outline-offset: 1px; }
+.ab-toggle-text { width: auto; display: inline-flex; gap: 6px; padding: 0 10px; font: 600 0.75rem/1 var(--body); border: 1px solid var(--line); }
+.ab-block:not(.ab-open) .ab-toggle { opacity: 0.55; }
+/* Bloco do mosaico clicável por inteiro: cursor de clique e leve elevação, na curva da transição. */
+.ab-clickable { cursor: pointer; transition: border-color 0.2s, box-shadow 0.3s cubic-bezier(0.32, 0.72, 0, 1), transform 0.3s cubic-bezier(0.32, 0.72, 0, 1); }
+.ab-clickable:hover { border-color: color-mix(in srgb, var(--azul) 35%, var(--line)); box-shadow: 0 10px 28px -18px color-mix(in srgb, var(--ink) 55%, transparent); transform: translateY(-2px); }
+.ab-clickable:active { transform: translateY(0) scale(0.995); }
+.ab-clickable .ab-name { cursor: inherit; }
+.ab-clickable .ab-name::after { content: none; }
+.ab-block:hover .ab-toggle, .ab-toggle:focus-visible { opacity: 1; }
+
+/* Área expandida: ocupa a largura e as demais viram uma coluna estreita ao lado. Os mini-blocos
+   ganham largura mínima maior e uma linha de fatos (término, tarefas atrasadas, fase). */
+.ab-focus { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; }
+.ab-open .ab-list { --tile-min: 200px; max-height: none; }
+.ab-open .ab-head h3 { font-size: 1.25rem; }
+.ab-facts { font-size: 0.75rem; color: var(--ink-60); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ab-rail { display: flex; flex-wrap: wrap; gap: 6px; min-height: 0; }
+.ab-rail .ab-block { flex: 1 1 150px; padding: 0; }
+.ab-mini-btn { display: grid; gap: 6px; width: 100%; height: 100%; align-content: center; padding: 8px 10px; border: 0; border-radius: inherit; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; transition: background 0.2s; }
+.ab-mini-btn:hover { background: var(--paper); }
+.ab-mini-btn:focus-visible { outline: 2px solid var(--azul); outline-offset: -2px; }
+.ab-mini-btn .ab-title-row { flex-wrap: nowrap; }
+.ab-mini-name { margin-right: auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 600 0.875rem/1.2 var(--display); }
+.ab-mini-n { font-size: 0.75rem; color: var(--ink-60); font-variant-numeric: tabular-nums; }
+.ab-mini .ab-alert { min-width: 20px; text-align: center; }
+.ab-mini .ab-alert-l { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; }
+.ab-mix { display: flex; gap: 2px; height: 4px; border-radius: 999px; overflow: hidden; }
+.ab-mix > span { min-width: 4px; background: var(--g); }
+
+/* Microinterações dos projetos: leve elevação ao passar o mouse, na mesma curva da transição. */
+.ab-item { transition: background 0.15s, border-color 0.15s, transform 0.25s cubic-bezier(0.32, 0.72, 0, 1), box-shadow 0.25s; }
+.ab-item:hover { transform: translateY(-1px); box-shadow: inset 0 3px 0 var(--g), 0 6px 16px -10px color-mix(in srgb, var(--ink) 45%, transparent); }
+
+/* Transição entre mosaico e área expandida (View Transitions): blocos, cabeçalhos e projetos
+   deslizam e mudam de tamanho na mesma curva de mola amortecida, como no iOS, e no mesmo tempo.
+   O cartão do bloco é desenhado pelo próprio grupo da transição (fundo, borda e raio de verdade,
+   que crescem sem deformar); a "foto" do bloco fica oculta. O cabeçalho anima à parte, no tamanho
+   natural, ancorado no canto: desliza junto com a borda, sem ser esticado nem dar zoom. */
+.ab-block { view-transition-class: ab-block; }
+.ab-head, .ab-mini-btn { view-transition-class: ab-head; }
+.ab-item { view-transition-class: ab-item; }
+::view-transition-group(*.ab-block), ::view-transition-group(*.ab-head), ::view-transition-group(*.ab-item) {
+  animation-duration: 0.5s;
+  animation-timing-function: cubic-bezier(0.32, 0.72, 0, 1);
+}
+::view-transition-group(*.ab-block) { box-sizing: border-box; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--surface); }
+::view-transition-old(*.ab-block), ::view-transition-new(*.ab-block) { animation: none; opacity: 0; }
+::view-transition-old(*.ab-head), ::view-transition-new(*.ab-head) { width: auto; height: auto; }
+::view-transition-old(*.ab-head) { animation: 0.1s ease-out both ab-out; }
+::view-transition-new(*.ab-head) { animation: 0.24s cubic-bezier(0.32, 0.72, 0, 1) 0.06s both ab-in; }
+::view-transition-old(root), ::view-transition-new(root) { animation-duration: 0.3s; }
+/* Projetos: o cartão cresce como uma janela que revela o conteúdo no tamanho final, sem zoom no
+   texto. O de antes some rápido para não deixar fantasma; os que saem de cena (das áreas que viram
+   coluna) somem logo e os que entram aparecem quando o movimento já assentou. */
+::view-transition-group(*.ab-item) { overflow: clip; clip-path: inset(0 round var(--radius-sm, 8px)); }
+::view-transition-old(*.ab-item), ::view-transition-new(*.ab-item) { width: auto; height: auto; object-fit: none; object-position: left top; }
+::view-transition-old(*.ab-item) { animation: 0.1s ease-out both ab-out; }
+::view-transition-new(*.ab-item) { animation: 0.26s cubic-bezier(0.32, 0.72, 0, 1) 0.06s both ab-in; }
+::view-transition-old(*.ab-item):only-child { animation: 0.14s ease-out both ab-out; }
+::view-transition-new(*.ab-item):only-child { animation: 0.3s cubic-bezier(0.32, 0.72, 0, 1) 0.2s both ab-in; }
+@keyframes ab-out { to { opacity: 0; } }
+@keyframes ab-in { from { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-group(*), ::view-transition-old(*), ::view-transition-new(*) { animation: none !important; }
+  .ab-item, .ab-toggle, .ab-clickable { transition: none; }
+  .ab-item:hover, .ab-clickable:hover, .ab-clickable:active { transform: none; }
+}
+@media (forced-colors: active) { .ab-bar, .ab-legend li::before { forced-color-adjust: none; border: 1px solid CanvasText; } }
+
 /* Home em painel. No desktop a página não rola: o quadro e a coluna lateral rolam cada um
    por dentro, só na vertical. Em telas baixas ou estreitas volta ao fluxo normal. */
 .dash { display: grid; gap: 14px; }
@@ -101,10 +232,15 @@
 .dash-date::first-letter { text-transform: uppercase; }
 .dash-mode { flex: none; padding: 4px 12px; border-radius: 999px; background: rgba(240, 211, 106, 0.18); box-shadow: inset 0 0 0 1px rgba(240, 211, 106, 0.55); color: #f6e3a1; font: 600 0.75rem/1.4 var(--mono); letter-spacing: 0.06em; text-transform: uppercase; }
 @media (max-width: 520px) { .dash-mode { display: none; } }
+.dash-side-toggle { flex: none; display: inline-flex; align-items: center; gap: 6px; min-height: 32px; padding: 0 12px; border: 0; border-radius: 999px; background: rgba(255, 255, 255, 0.12); color: #fff; font: 600 0.75rem/1 var(--body); cursor: pointer; }
+.dash-side-toggle:hover { background: rgba(255, 255, 255, 0.22); }
+.dash-side-toggle:focus-visible { outline: 2px solid #f0d36a; outline-offset: 2px; }
+@media (max-width: 720px) { .dash-side-toggle { font-size: 0; gap: 0; padding: 0 9px; } }
 .dash-main, .dash-side { min-width: 0; }
 .dash .ov { margin-bottom: 0; }
 .dash-side { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; align-content: start; }
 .dash-side > * { min-width: 0; margin: 0; }
+.dash-side[hidden] { display: none; }
 .dash-side > .card { padding: 14px 16px; box-shadow: none; }
 .dash-side .card-head { flex-wrap: wrap; }
 .dash-side .okr-pulse-grid { grid-template-columns: minmax(0, 1fr); gap: 10px; }
@@ -132,10 +268,70 @@
   .main:has(> .dash) { max-width: 1680px; height: 100dvh; display: flex; flex-direction: column; padding-bottom: 16px; }
   .dash { flex: 1; min-height: 0; grid-template-columns: minmax(0, 1fr) clamp(300px, 24vw, 360px); grid-template-rows: auto minmax(0, 1fr); }
   .dash:has(> .dash-main:empty) { grid-template-columns: minmax(0, 720px); }
+  .dash.dash-wide { grid-template-columns: minmax(0, 1fr); }
   .dash-hello { grid-column: 1 / -1; }
   .dash-main { display: flex; flex-direction: column; gap: 12px; min-height: 0; overflow: hidden auto; }
   .dash-main .ov { flex: 1; min-height: 0; display: flex; flex-direction: column; }
-  .dash-main .pn-board-wrap { flex: 1; min-height: 200px; }
+  /* Painel numa tela só, sem rolagem: as áreas ficam lado a lado, cada uma com largura
+     proporcional aos projetos (--n), e quebram de linha quando não cabem; as linhas dividem a
+     altura. Dentro da área, os mini-blocos dividem a altura do bloco e ficam mais compactos
+     conforme o espaço encolhe (consultas de tamanho abaixo). Só se nem assim couber (dezenas de
+     projetos numa área) a lista rola: melhor que esconder projeto. */
+  .dash-main .ab-grid { flex: 1; min-height: 0; display: flex; flex-wrap: wrap; align-content: stretch; gap: 10px; }
+  .dash-main .ab-block { flex: var(--n, 1) 1 150px; min-height: 0; padding: 10px 12px; }
+  .dash-main .ab-head { margin-bottom: 8px; padding-bottom: 6px; }
+  /* Bloco baixo (muitas áreas na tela): a linha "N projetos · média" sai e o cabeçalho encolhe;
+     a contagem e o progresso continuam visíveis nos mini-blocos e nos números do topo. A altura
+     do bloco vem da linha do painel, não do conteúdo, então pode ser consultada. */
+  .dash-main .ab-block { container: abblock / size; }
+  /* Base 0: a altura da lista vem do espaço que sobra no bloco, nunca do conteúdo; a altura de
+     cada linha (--tile-h) é medida em AreaBlocks.tsx (useFitTiles). */
+  .dash-main .ab-list { --tile-min: 120px; flex: 1 1 0; min-height: 0; max-height: none; grid-template-columns: repeat(var(--cols, 1), minmax(0, 1fr)); grid-auto-rows: var(--tile-h, minmax(26px, 1fr)); align-content: start; gap: 6px; overflow: hidden; }
+  .dash-main .ab-list[data-tight] { overflow-y: auto; }
+  .dash-main .ab-item { container-type: size; padding: 0; }
+  /* Área expandida no painel: ela à esquerda, as outras empilhadas numa coluna à direita que
+     reparte a altura (cada cartão encolhe até 34px; só com muitas áreas a coluna rola). */
+  .dash-main .ab-focus { display: grid; flex: 1; min-height: 0; grid-template-columns: minmax(0, 1fr) clamp(150px, 17%, 220px); grid-template-rows: minmax(0, 1fr); }
+  .dash-main .ab-focus > .ab-open { min-height: 0; }
+  .dash-main .ab-open .ab-list { --tile-min: 170px; }
+  /* Cartões da coluna com altura compacta e alinhados no topo: esticados, ficavam vazios. */
+  .dash-main .ab-rail { display: grid; grid-auto-rows: minmax(34px, 58px); align-content: start; gap: 6px; overflow: hidden auto; }
+  .dash-main .ab-rail .ab-block { container: none; min-height: 0; overflow: hidden; }
+  .dash-main .ab-rail .ab-mini-btn { padding: 4px 10px; gap: 4px; }
+  .dash-main .ab-tile { height: 100%; justify-content: center; }
   .dash-main, .dash-side { position: relative; }
   .dash-side { min-height: 0; overflow: hidden auto; }
+}
+
+/* Mini-bloco que encolhe no painel sem rolagem: menos texto quanto menor a altura. Só vale onde
+   .ab-item é container de tamanho (no painel); no fluxo normal o mini-bloco tem altura própria. */
+@container (max-height: 100px) { .ab-from, .ab-facts { display: none; } .ab-tile { gap: 5px; padding: 6px 10px; } .ab-name { -webkit-line-clamp: 1; min-height: 0; } .ab-health { display: none; } }
+@container (max-height: 70px) {
+  .ab-tile { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-content: center; gap: 4px 8px; padding: 3px 8px; }
+  .ab-bar { grid-column: 1 / -1; grid-row: 2; height: 6px; }
+  .ab-pct strong { font-size: 0.8125rem; }
+}
+@container (max-height: 32px) { .ab-tile { gap: 2px 6px; padding: 2px 8px; font-size: 0.75rem; } .ab-bar { height: 4px; } .ab-pct strong { font-size: 0.75rem; } }
+
+/* Tela baixa (notebook 1366×768): saudação e números mais baixos para sobrar altura aos projetos. */
+@media (min-width: 1100px) and (min-height: 640px) and (max-height: 860px) {
+  .dash { gap: 10px; }
+  .dash-hello { padding: 8px 16px; }
+  .dash-avatar { width: 36px; height: 36px; }
+  .dash-hello h1 { font-size: 1.125rem; }
+  .dash-main .pn-head { margin-bottom: 6px; }
+  .dash-main .pn-stats { margin-bottom: 8px; }
+  .dash-main .pn-stat > div, .dash-main .pn-stat > button { padding: 6px 12px; }
+  .dash-main .pn-stat-v { font-size: 1.125rem; }
+}
+
+@container abblock (max-height: 210px) {
+  .ab-meta { display: none; }
+  .ab-head { margin-bottom: 6px !important; padding-bottom: 4px !important; }
+  .ab-head h3 { font-size: 0.9375rem; }
+  /* Selo só com o número na cor da situação; o texto segue para leitor de tela e na dica. */
+  .ab-title-row { flex-wrap: nowrap; }
+  .ab-title-row h3 { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ab-alert { flex: none; min-width: 20px; text-align: center; }
+  .ab-alert-l { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; }
 }

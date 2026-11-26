@@ -2,9 +2,9 @@ import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 
-/** Marca oficial da Terracap (arquivo do portal WordPress, em public/brand/). */
+/** Marca do produto Projet.AI (public/brand/projetai-logo.png, 864×200). Já traz o nome escrito. */
 export function Logo({ height = 34 }: { height?: number }) {
-  return <img className="brand-logo" src="/brand/terracap-logo.png" alt="Terracap" height={height} width={Math.round((height * 200) / 52)} />;
+  return <img className="brand-logo" src="/brand/projetai-logo.png" alt="Projet.AI" height={height} width={Math.round((height * 864) / 200)} />;
 }
 
 export function ErrorBox({ error, onRetry }: { error: unknown; onRetry?: () => void }) {

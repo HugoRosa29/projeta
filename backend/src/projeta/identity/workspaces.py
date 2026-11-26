@@ -268,7 +268,8 @@ def my_profile(ctx: Ctx) -> dict:
     """
     user = ctx.one(
         "SELECT u.id, u.name, u.email, u.matricula, u.allotment, u.timezone, u.created_at, "
-        "u.matricula IS NOT NULL AS via_gia, ou.sigla AS unit, ou.label AS unit_label "
+        "u.matricula IS NOT NULL AS via_gia, ou.sigla AS unit, ou.label AS unit_label, "
+        "(SELECT f.updated_at FROM user_photos f WHERE f.user_id = u.id) AS photo_version "
         "FROM users u LEFT JOIN org_units ou ON ou.sigla = projeta_unit_for_allotment(u.allotment) "
         "WHERE u.id = %s",
         (ctx.user_id,),

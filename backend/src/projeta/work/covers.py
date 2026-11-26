@@ -3,24 +3,9 @@
 from ..db import Ctx
 from ..errors import BadRequestError, ForbiddenError
 from ..identity.access import project_access
+from ..identity.photos import sniff_type  # mesma checagem de conteúdo da foto de perfil
 
 MAX_BYTES = 3 * 1024 * 1024
-
-# O tipo vem dos primeiros bytes, nunca do cabeçalho enviado: o cliente não escolhe o que é servido.
-# SVG fica de fora de propósito (pode carregar script).
-_SIGNATURES = (
-    (b"\x89PNG\r\n\x1a\n", "image/png"),
-    (b"\xff\xd8\xff", "image/jpeg"),
-)
-
-
-def sniff_type(data: bytes) -> str | None:
-    for magic, ctype in _SIGNATURES:
-        if data.startswith(magic):
-            return ctype
-    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
-        return "image/webp"
-    return None
 
 
 def set_cover(ctx: Ctx, project_id: str, data: bytes) -> dict:

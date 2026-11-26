@@ -11,6 +11,7 @@ from ..identity.access import (
     role_in,
 )
 from ..identity.policy import assert_can
+from . import baselines
 from .activity import log_activity
 from .formal import PHASES
 
@@ -125,6 +126,7 @@ def create_project(
         "INSERT INTO project_members(project_id,user_id) VALUES (%s,%s)", (p["id"], ctx.user_id)
     )
     log_activity(ctx, workspace_id, "project.created", p["id"], data={"name": name})
+    baselines.create_initial(ctx, str(p["id"]))
     return p
 
 
@@ -134,6 +136,8 @@ def list_projects(ctx: Ctx, workspace_id: str, include_archived: bool = False) -
         f"""SELECT p.id, p.workspace_id, p.name, p.description, p.status, p.created_at,
           p.phase, p.approach, p.sei_process, p.summary, p.responsible, p.requester, p.external_ref,
           p.attributes, p.progress,
+          -- Pasta só vale no espaço dono: quem recebeu pelo organograma não vê a organização alheia.
+          CASE WHEN p.workspace_id = %(ws)s THEN p.folder_id::text END AS folder_id,
           (SELECT count(*)::int FROM tasks t WHERE t.project_id = p.id) AS task_count,
           (SELECT count(*)::int FROM tasks t WHERE t.project_id = p.id AND t.status = 'done') AS done_count,
           (SELECT max(a.created_at) FROM activity a WHERE a.project_id = p.id) AS last_activity,

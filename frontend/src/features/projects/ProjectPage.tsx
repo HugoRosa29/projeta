@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CornerDownRight, FileText, Link2, History, ImagePlus, Trash2, Users } from "lucide-react";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { Link, useParams, useSearchParams } from "react-router";
 import { Hero } from "../../components/Hero";
 import { Dialog, Empty, ErrorBox, Loading, useToast } from "../../components/ui";
@@ -23,12 +23,15 @@ import { useAnnounceProject } from "../../app/projectContext";
 import { useSession } from "../../app/session";
 import { useUpdateTask } from "../tasks/hooks";
 import { localToday, projectProgress, projectRisk, subtaskCounts } from "../../domain/work";
-import { DueBadge, QuickAdd, SubtaskBadge, TaskDialog, TaskList, TaskTags } from "../tasks/TaskParts";
+import { ShareButton } from "../sharing/ShareButton";
+import { DueBadge, QuickAdd, SubtaskBadge, TaskDialog, TaskTags } from "../tasks/TaskParts";
 import { coverUrl, useCoverActions } from "./cover";
 import { ProjectDetails } from "./ProjectDetails";
 import { FormalPanel } from "./FormalPanel";
+import { RisksCard, RisksPanel } from "./RisksPanel";
 import { Timeline } from "./Timeline";
 import { InviteByMatricula } from "./InviteByMatricula";
+import { PhaseList } from "./PhaseList";
 import { ActiveSprintCard, SprintsView } from "../sprints/SprintsView";
 import { useSprints } from "../sprints/hooks";
 
@@ -47,6 +50,7 @@ const VIEWS = [
   ["quadro", "Quadro"],
   ["lista", "Lista"],
   ["cronograma", "Cronograma"],
+  ["riscos", "Riscos"],
   ["formal", "Formal"],
 ] as const;
 
@@ -73,6 +77,15 @@ export function ProjectPage() {
       setSp(n, { replace: true });
     }
   };
+
+  // Link da visão geral para um risco: a aba abre a ficha dele e o endereço volta a ser só a aba.
+  const clearRiskParam = useCallback(() => {
+    setSp((cur) => {
+      const n = new URLSearchParams(cur);
+      n.delete("risk");
+      return n;
+    }, { replace: true });
+  }, [setSp]);
 
   const q = useQuery({ queryKey: ["project", id], queryFn: () => api.get<ProjectData>(`/projects/${id}`) });
   const tasksQ = useQuery({ queryKey: ["tasks", "project", id], queryFn: () => api.get<{ tasks: Task[] }>(`/projects/${id}/tasks`) });
@@ -118,6 +131,7 @@ export function ProjectPage() {
         <button className="btn btn-glass btn-sm" onClick={() => setPanel("historico")}>
           <History size={16} aria-hidden /> Histórico
         </button>
+        {workspace.kind === "team" && <ShareButton workspaceId={workspace.id} kind="project" id={id} name={d.project.name} className="btn btn-glass btn-sm" />}
       </Hero>
       {/* Abas e criação rápida dividem a mesma faixa: a altura que sobra fica para o trabalho. */}
       <div className="project-bar">
@@ -128,15 +142,16 @@ export function ProjectPage() {
             </Link>
           ))}
         </nav>
-        {d.can_write && view !== "visao" && <QuickAdd workspaceId={d.project.workspace_id} projectId={id} tasks={tasks} placeholder="Nova tarefa neste projeto…" />}
+        {d.can_write && view !== "visao" && view !== "riscos" && <QuickAdd workspaceId={d.project.workspace_id} projectId={id} tasks={tasks} placeholder="Nova tarefa neste projeto…" />}
       </div>
 
       <div className={`project-view pv-${view}`}>
-        {view === "visao" && <Overview d={d} tasks={tasks} onOpen={setOpen} onGoSprints={() => setSp({ view: "sprints" })} />}
+        {view === "visao" && <Overview d={d} tasks={tasks} onOpen={setOpen} onGoSprints={() => setSp({ view: "sprints" })} onGoRisks={(risk) => setSp(risk ? { view: "riscos", risk } : { view: "riscos" })} />}
         {view === "sprints" && (taskViewsError ?? <SprintsView projectId={id} tasks={tasks} onOpen={setOpen} />)}
         {view === "quadro" && (taskViewsError ?? <Board projectId={id} tasks={tasks} canWrite={d.can_write} onOpen={setOpen} />)}
-        {view === "lista" && <ListView projectId={id} tasks={tasks} members={d.members} canWrite={d.can_write} onOpen={setOpen} />}
-        {view === "cronograma" && (taskViewsError ?? <Timeline tasks={tasks} canWrite={d.can_write} onOpen={setOpen} />)}
+        {view === "lista" && <ListView projectId={id} workspaceId={d.project.workspace_id} tasks={tasks} members={d.members} canWrite={d.can_write} onOpen={setOpen} />}
+        {view === "cronograma" && (taskViewsError ?? <Timeline tasks={tasks} canWrite={d.can_write} onOpen={setOpen} projectId={id} />)}
+        {view === "riscos" && <RisksPanel projectId={id} members={d.members} openRisk={sp.get("risk")} onOpenedRisk={clearRiskParam} />}
         {view === "formal" && <FormalPanel project={d.project} members={d.members} canManage={d.can_manage} />}
       </div>
       {open && <TaskDialog taskId={open} members={d.members} onClose={closeTask} />}
@@ -256,7 +271,7 @@ function PvRow({ task, lead, onOpen }: { task: Task; lead: ReactNode; onOpen: (i
 
 /** Visão geral: o que está em risco, o que vem a seguir e o que é meu. Ficha, equipe e histórico
  * ficam nos botões do cabeçalho. */
-function Overview({ d, tasks, onOpen, onGoSprints }: { d: ProjectData; tasks: Task[]; onOpen: (id: string) => void; onGoSprints: () => void }) {
+function Overview({ d, tasks, onOpen, onGoSprints, onGoRisks }: { d: ProjectData; tasks: Task[]; onOpen: (id: string) => void; onGoSprints: () => void; onGoRisks: (riskId: string | null) => void }) {
   const { user } = useSession();
   const total = tasks.length;
   const done = d.stats.done ?? 0;
@@ -270,10 +285,11 @@ function Overview({ d, tasks, onOpen, onGoSprints }: { d: ProjectData; tasks: Ta
     .map((s) => `${d.stats[s]} ${STATUS_LABEL[s].toLowerCase()}`)
     .join(" · ");
   const kpis = [
-    ["Atrasadas", risk.late.length, "alerta"],
-    ["Bloqueadas", risk.blocked.length, "alerta"],
-    ["Vencem em 7 dias", risk.dueSoon.length, "warn"],
+    ["Atrasadas", risk.late, "alerta", "late"],
+    ["Bloqueadas", risk.blocked, "alerta", "blocked"],
+    ["Vencem em 7 dias", risk.dueSoon, "warn", "soon"],
   ] as const;
+  const [kpiOpen, setKpiOpen] = useState<(typeof kpis)[number] | null>(null);
   return (
     <div className="pv-overview">
       <div className="pv-kpis">
@@ -283,13 +299,40 @@ function Overview({ d, tasks, onOpen, onGoSprints }: { d: ProjectData; tasks: Ta
           <div className="progress" role="progressbar" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100} aria-label="Progresso do projeto"><span style={{ width: `${pct}%` }} /></div>
           <span className="pv-kpi-note">{done} de {total} tarefas concluídas{openByStatus && ` · ${openByStatus}`}</span>
         </section>
-        {kpis.map(([label, n, tone]) => (
-          <section key={label} className={`pv-kpi ${n > 0 ? tone : "zero"}`} aria-label={`${label}: ${n}`}>
-            <span className="coord">{label}</span>
-            <strong>{n}</strong>
-          </section>
-        ))}
+        {kpis.map((k) => {
+          const [label, list, tone] = k;
+          const n = list.length;
+          // Com zero não há o que listar: fica como cartão estático.
+          return n > 0 ? (
+            <button key={label} type="button" className={`pv-kpi pv-kpi-btn ${tone}`} aria-label={`${label}: ${n}. Ver tarefas`} onClick={() => setKpiOpen(k)}>
+              <span className="coord">{label}</span>
+              <strong>{n}</strong>
+            </button>
+          ) : (
+            <section key={label} className="pv-kpi zero" aria-label={`${label}: 0`}>
+              <span className="coord">{label}</span>
+              <strong>0</strong>
+            </section>
+          );
+        })}
       </div>
+      {kpiOpen && (
+        <Dialog title={`${kpiOpen[0]} (${kpiOpen[1].length})`} onClose={() => setKpiOpen(null)} className="pv-dialog">
+          <ul className="pv-rows">
+            {kpiOpen[1].map((t) => (
+              <PvRow
+                key={t.id}
+                task={t}
+                onOpen={(id) => {
+                  setKpiOpen(null);
+                  onOpen(id);
+                }}
+                lead={<span className={`badge ${REASON[kpiOpen[3]][1]}`}>{t.due_date ? fmtDate(t.due_date) : "Sem prazo"}</span>}
+              />
+            ))}
+          </ul>
+        </Dialog>
+      )}
       <div className="pv-cols">
         <section className="card pane">
           <h2>Precisa de atenção {risk.attention.length > 0 && <span className="badge alerta">{risk.attention.length}</span>}</h2>
@@ -303,18 +346,9 @@ function Overview({ d, tasks, onOpen, onGoSprints }: { d: ProjectData; tasks: Ta
             )}
           </div>
         </section>
-        <section className="card pane">
-          <h2>Próximas entregas <span className="coord">7 dias</span></h2>
-          <div className="pane-body">
-            {risk.upcoming.length === 0 ? <p className="muted">Nenhuma entrega prevista para os próximos 7 dias.</p> : (
-              <ul className="pv-rows">
-                {risk.upcoming.map((t) => (
-                  <PvRow key={t.id} task={t} onOpen={onOpen} lead={<span className={`pv-date ${t.due_date === today ? "today" : ""}`}>{t.due_date === today ? "Hoje" : fmtDate(t.due_date)}</span>} />
-                ))}
-              </ul>
-            )}
-          </div>
-        </section>
+        {/* Riscos registrados (aba Riscos) no lugar das próximas entregas: o que vence em 7 dias
+            já aparece no indicador acima e em "Precisa de atenção". */}
+        <RisksCard projectId={d.project.id} onOpen={onGoRisks} />
         <div className="pv-col">
           <section className="card pane">
             <h2>Minhas tarefas {mine.length > 0 && <span className="badge">{mine.length}</span>}</h2>
@@ -411,7 +445,7 @@ function Board({ projectId, tasks: all, canWrite, onOpen }: { projectId: string;
   );
 }
 
-function ListView({ projectId, tasks, members, canWrite, onOpen }: { projectId: string; tasks: Task[]; members: Member[]; canWrite: boolean; onOpen: (id: string) => void }) {
+function ListView({ projectId, workspaceId, tasks, members, canWrite, onOpen }: { projectId: string; workspaceId: string; tasks: Task[]; members: Member[]; canWrite: boolean; onOpen: (id: string) => void }) {
   const sprint = useSprintFilter(projectId, false);
   const [status, setStatus] = useState("");
   const [priority, setPriority] = useState("");
@@ -425,6 +459,7 @@ function ListView({ projectId, tasks, members, canWrite, onOpen }: { projectId: 
       (!text || t.title.toLowerCase().includes(text.toLowerCase())) &&
       sprint.keep(t),
   );
+  const filtering = shown.length !== tasks.length || !!(status || priority || assignee || text);
   return (
     <div className="pv-stack">
       <div className="pv-toolbar" role="search" aria-label="Filtrar tarefas">
@@ -445,8 +480,12 @@ function ListView({ projectId, tasks, members, canWrite, onOpen }: { projectId: 
         {sprint.select}
       </div>
       <div className="pv-scroll">
-        {canWrite && shown.length > 1 && <p className="coord dep-tip"><Link2 size={12} aria-hidden /> Para ordenar o trabalho, arraste uma tarefa e solte sobre a que só pode começar depois dela.</p>}
-        {shown.length === 0 ? <Empty title={tasks.length ? "Nenhuma tarefa com esses filtros" : "Sem tarefas"}>{tasks.length ? "Limpe os filtros para ver todas." : "Use o campo acima para criar a primeira."}</Empty> : <TaskList tasks={shown} all={tasks} onOpen={onOpen} dependencies={{ canWrite }} />}
+        {canWrite && shown.length > 1 && <p className="coord dep-tip"><Link2 size={12} aria-hidden /> Arraste uma tarefa sobre a que só pode começar depois dela, ou sobre o título de uma fase para movê-la.</p>}
+        {filtering && shown.length === 0 ? (
+          <Empty title="Nenhuma tarefa com esses filtros">Limpe os filtros para ver todas.</Empty>
+        ) : (
+          <PhaseList projectId={projectId} workspaceId={workspaceId} tasks={tasks} shown={shown} filtering={filtering} canWrite={canWrite} onOpen={onOpen} />
+        )}
       </div>
       <p className="coord pv-count">{shown.length} de {tasks.length} tarefas</p>
     </div>

@@ -45,10 +45,13 @@ function Solid({ d, from, height, top, side, edge = true }: { d: string; from: n
 /** `onLight`: versão para fundo claro (menu lateral). Decorativa: some para leitores de tela. */
 export function Skyline({ onLight = false, chips = true }: { onLight?: boolean; chips?: boolean }) {
   const uid = useId().replace(/:/g, "");
+  // No menu lateral fica só o símbolo (sem sol nem arcos), enquadrado na placa, nas peças e na sombra.
+  const viewBox = onLight ? "45 60 490 390" : "0 0 600 420";
   return (
     <div className={`sk ${onLight ? "on-light" : ""}`} aria-hidden="true">
       <div className="sk-stage">
-        <svg className="sk-layer sk-sky" viewBox="0 0 600 420" focusable="false">
+        {!onLight && (
+        <svg className="sk-layer sk-sky" viewBox={viewBox} focusable="false">
           <defs>
             <radialGradient id={`sun-${uid}`} cx="50%" cy="50%" r="50%">
               <stop offset="0%" stopColor="#ffe79a" />
@@ -62,7 +65,8 @@ export function Skyline({ onLight = false, chips = true }: { onLight?: boolean; 
           </g>
           <circle className="sk-sun" cx="470" cy="96" r="44" fill={`url(#sun-${uid})`} />
         </svg>
-        <svg className="sk-layer sk-city" viewBox="0 0 600 420" focusable="false">
+        )}
+        <svg className="sk-layer sk-city" viewBox={viewBox} focusable="false">
           <defs>
             <filter id={`blur-${uid}`} x="-20%" y="-20%" width="140%" height="140%">
               <feGaussianBlur stdDeviation="3.2" />

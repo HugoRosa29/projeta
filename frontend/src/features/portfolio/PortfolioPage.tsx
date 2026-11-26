@@ -11,11 +11,15 @@ import { api } from "../../services/api";
 import { coverUrl } from "../projects/cover";
 import { areasOf, pickArea } from "../../domain/areas";
 import { AreaTabs, useArea } from "../today/Areas";
+import { useViewMode, ViewToggle, type ViewMode } from "../../components/ViewToggle";
+import { Panorama } from "./Panorama";
 
 const PHASES = Object.keys(PHASE_LABEL) as Phase[];
 const SEVERITY: Record<Health, number> = { late: 0, at_risk: 1, on_track: 2 };
 const BADGE: Record<Health, string> = { late: "alerta", at_risk: "warn", on_track: "ok" };
 type Filter = "all" | Health;
+// O quadro (o antigo panorama da home) é o padrão: a home ficou com o resumo em blocos por área.
+const MODES: readonly ViewMode[] = ["board", "blocks", "list"];
 
 export function PortfolioPage() {
   const { workspace } = useSession();
@@ -23,6 +27,7 @@ export function PortfolioPage() {
   const [field, setField] = useState("");
   const [fieldValue, setFieldValue] = useState("");
   const [areaId, setArea] = useArea();
+  const [view, setView] = useViewMode("portfolio", MODES);
   const q = useQuery({
     queryKey: ["portfolio", workspace.id],
     queryFn: () => api.get<{ projects: Row[] }>("/portfolio", { workspace_id: workspace.id }),
@@ -52,47 +57,125 @@ export function PortfolioPage() {
 
       {areas.length > 1 && <AreaTabs areas={areas} current={area?.id ?? null} onPick={setArea} total={everything.length} />}
 
-      {index.size > 0 && (
-        <div className="row pf-fields" role="search" aria-label="Filtrar por campo do portfólio">
-          <select className="select" aria-label="Campo" value={field} onChange={(e) => (setField(e.target.value), setFieldValue(""))}>
-            <option value="">Todos os campos</option>
-            {[...index.keys()].map((n) => <option key={n} value={n}>{n}</option>)}
-          </select>
-          {field && (
-            <select className="select" aria-label={`Valor de ${field}`} value={fieldValue} onChange={(e) => setFieldValue(e.target.value)}>
-              <option value="">Qualquer valor</option>
-              {(index.get(field) ?? []).map((v) => <option key={v} value={v}>{v}</option>)}
-            </select>
-          )}
-          {field && <button type="button" className="btn btn-ghost btn-sm" onClick={() => (setField(""), setFieldValue(""))}>Limpar</button>}
-        </div>
-      )}
+      <div className="view-bar">
+        <ViewToggle mode={view} onChange={setView} modes={MODES} />
+      </div>
 
-      {all.length === 0 ? (
-        <Empty title="Nenhum projeto ativo">Crie um projeto em Projetos para acompanhá-lo aqui.</Empty>
+      {view === "board" ? (
+        all.length ? (
+          // A chave zera filtros e agrupamento ao trocar de área: campos de uma não valem na outra.
+          <Panorama key={area?.id ?? ""} rows={all} workspaceName={area ? area.label : workspace.name} />
+        ) : (
+          <Empty title="Nenhum projeto ativo">Crie um projeto em Projetos para acompanhá-lo aqui.</Empty>
+        )
       ) : (
         <>
-          <div className="pf-tiles" role="group" aria-label="Filtrar por situação">
-            {tiles.map((t) => (
-              <button key={t.key} type="button" className={`pf-tile ${t.tone}`} aria-pressed={filter === t.key} onClick={() => setFilter(t.key)}>
-                <span className="pf-n">{t.n}</span>
-                <span className="pf-l">{t.label}</span>
-              </button>
-            ))}
-          </div>
-
-          {shown.length === 0 ? (
-            <Empty title="Nenhum projeto nessa situação">Escolha outra situação acima para ver os demais.</Empty>
-          ) : (
-            <div className="pf-grid">
-              {shown.map((r) => (
-                <ProjectCard key={r.id} r={r} />
-              ))}
+          {index.size > 0 && (
+            <div className="row pf-fields" role="search" aria-label="Filtrar por campo do portfólio">
+              <select className="select" aria-label="Campo" value={field} onChange={(e) => (setField(e.target.value), setFieldValue(""))}>
+                <option value="">Todos os campos</option>
+                {[...index.keys()].map((n) => <option key={n} value={n}>{n}</option>)}
+              </select>
+              {field && (
+                <select className="select" aria-label={`Valor de ${field}`} value={fieldValue} onChange={(e) => setFieldValue(e.target.value)}>
+                  <option value="">Qualquer valor</option>
+                  {(index.get(field) ?? []).map((v) => <option key={v} value={v}>{v}</option>)}
+                </select>
+              )}
+              {field && <button type="button" className="btn btn-ghost btn-sm" onClick={() => (setField(""), setFieldValue(""))}>Limpar</button>}
             </div>
+          )}
+
+          {all.length === 0 ? (
+            <Empty title="Nenhum projeto ativo">Crie um projeto em Projetos para acompanhá-lo aqui.</Empty>
+          ) : (
+            <>
+              <div className="pf-tiles" role="group" aria-label="Filtrar por situação">
+                {tiles.map((t) => (
+                  <button key={t.key} type="button" className={`pf-tile ${t.tone}`} aria-pressed={filter === t.key} onClick={() => setFilter(t.key)}>
+                    <span className="pf-n">{t.n}</span>
+                    <span className="pf-l">{t.label}</span>
+                  </button>
+                ))}
+              </div>
+
+              {shown.length === 0 ? (
+                <Empty title="Nenhum projeto nessa situação">Escolha outra situação acima para ver os demais.</Empty>
+              ) : (
+                view === "list" ? (
+                  <div className="plist pf-list" role="list" aria-label="Projetos do portfólio">
+                    <div className="plist-head" aria-hidden="true">
+                      <span>Situação</span><span>Projeto</span><span>Fase</span><span>Progresso</span><span>Pendências</span>
+                    </div>
+                    {shown.map((r) => (
+                      <PortfolioRow key={r.id} r={r} />
+                    ))}
+                  </div>
+                ) : (
+                  <div className="pf-grid">
+                    {shown.map((r) => (
+                      <ProjectCard key={r.id} r={r} />
+                    ))}
+                  </div>
+                )
+              )}
+            </>
           )}
         </>
       )}
     </>
+  );
+}
+
+/** Versão em linha do cartão: mesmas informações, o mínimo de altura. SEI e campos vão numa
+ *  segunda linha curta, cortada se não couber (o texto completo fica na dica). */
+function PortfolioRow({ r }: { r: Row }) {
+  const { pct, informed } = projectProgress(r);
+  const at = r.phase ? PHASES.indexOf(r.phase) : -1;
+  const extra = [r.sei_process && `SEI ${r.sei_process}`, ...(r.attributes ?? []).map((a) => `${a.name}: ${a.value}`)].filter(Boolean).join(" · ");
+  return (
+    <Link to={`/projetos/${r.id}`} className={`plist-row ${r.health}`} role="listitem">
+      <span><span className={`badge ${BADGE[r.health]}`}>{HEALTH_LABEL[r.health]}</span></span>
+      <span className="plist-name">
+        <strong>{r.name}</strong>
+        {r.shared_from && <span className="badge" title="Compartilhado no organograma: só leitura">de {r.shared_from}</span>}
+        {extra && <small className="muted" title={extra}>{extra}</small>}
+      </span>
+      <span className="plist-cell">
+        {r.phase ? (
+          <>
+            <ol className="pf-steps" aria-label={`Fase: ${PHASE_LABEL[r.phase]}`}>
+              {PHASES.map((p, i) => (
+                <li key={p} className={i < at ? "done" : i === at ? "current" : ""} />
+              ))}
+            </ol>
+            <small className="coord">{PHASE_LABEL[r.phase]}</small>
+          </>
+        ) : (
+          <small className="coord">Projeto comum</small>
+        )}
+      </span>
+      <span className="plist-prog">
+        <span className="progress" role="progressbar" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100} aria-label={`Progresso de ${r.name}`}><span style={{ width: `${pct}%` }} /></span>
+        <span className="coord">{pct}%{informed ? "*" : ""} · {r.done_count}/{r.task_count}</span>
+      </span>
+      <span className="plist-facts">
+        <span className={r.overdue_count ? "bad" : ""} title={`${r.overdue_count} atrasada${r.overdue_count === 1 ? "" : "s"}`}>
+          {r.overdue_count ? <TriangleAlert size={14} aria-hidden /> : <CheckCircle2 size={14} aria-hidden />}
+          {r.overdue_count}<span className="sr-only"> atrasadas</span>
+        </span>
+        <span className={r.blocked_count ? "warn" : ""} title={`${r.blocked_count} bloqueada${r.blocked_count === 1 ? "" : "s"}`}>
+          <OctagonAlert size={14} aria-hidden />
+          {r.blocked_count}<span className="sr-only"> bloqueadas</span>
+        </span>
+        {r.phase && (
+          <span className={r.note_stale ? "warn" : ""} title={r.note_stale ? "Nota semanal vencida" : `Nota de ${new Date(r.last_note_at!).toLocaleDateString("pt-BR")}`}>
+            <FileText size={14} aria-hidden />
+            <span className="sr-only">{r.note_stale ? "Nota semanal vencida" : "Nota em dia"}</span>
+          </span>
+        )}
+      </span>
+    </Link>
   );
 }
 

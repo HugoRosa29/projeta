@@ -3,13 +3,18 @@ from starlette.concurrency import run_in_threadpool
 
 from ...db import uow
 from ...errors import BadRequestError
-from ...work import covers, formal, invites
+from ...work import baselines, covers, folders, formal, invites, phases
 from ...work import projects as svc
 from ..deps import current_user
 from ..schemas import (
     AttributeIn,
+    BaselineIn,
+    FolderIn,
     InviteMatriculaIn,
     MemberIn,
+    PhaseIn,
+    PhaseOrderIn,
+    ProjectFolderIn,
     ProjectIn,
     ProjectPatch,
     ProjectRolesIn,
@@ -74,6 +79,30 @@ def patch(project_id: str, body: ProjectPatch, user: dict = Depends(current_user
             body.progress,
             "progress" in body.model_fields_set and body.progress is None,
         )
+
+
+@router.get("/projects/{project_id}/baselines")
+def list_baselines(project_id: str, user: dict = Depends(current_user)) -> dict:
+    with uow(user["id"]) as ctx:
+        return baselines.list_baselines(ctx, project_id)
+
+
+@router.post("/projects/{project_id}/baselines", status_code=201)
+def create_baseline(project_id: str, body: BaselineIn, user: dict = Depends(current_user)) -> dict:
+    with uow(user["id"]) as ctx:
+        return baselines.create_baseline(ctx, project_id, body.name, body.note)
+
+
+@router.get("/projects/{project_id}/baselines/{baseline_id}")
+def get_baseline(project_id: str, baseline_id: str, user: dict = Depends(current_user)) -> dict:
+    with uow(user["id"]) as ctx:
+        return baselines.get_baseline(ctx, project_id, baseline_id)
+
+
+@router.delete("/projects/{project_id}/baselines/{baseline_id}", status_code=204)
+def delete_baseline(project_id: str, baseline_id: str, user: dict = Depends(current_user)) -> None:
+    with uow(user["id"]) as ctx:
+        baselines.delete_baseline(ctx, project_id, baseline_id)
 
 
 @router.put("/projects/{project_id}/cover")
@@ -197,3 +226,65 @@ def save_term(project_id: str, kind: str, body: TermIn, user: dict = Depends(cur
 def portfolio(workspace_id: str, user: dict = Depends(current_user)) -> dict:
     with uow(user["id"]) as ctx:
         return {"projects": formal.portfolio(ctx, workspace_id)}
+
+
+@router.get("/workspaces/{workspace_id}/folders")
+def list_folders(workspace_id: str, user: dict = Depends(current_user)) -> dict:
+    with uow(user["id"]) as ctx:
+        return folders.list_folders(ctx, workspace_id)
+
+
+@router.post("/workspaces/{workspace_id}/folders", status_code=201)
+def create_folder(workspace_id: str, body: FolderIn, user: dict = Depends(current_user)) -> dict:
+    with uow(user["id"]) as ctx:
+        return folders.create_folder(ctx, workspace_id, body.name)
+
+
+@router.patch("/folders/{folder_id}")
+def rename_folder(folder_id: str, body: FolderIn, user: dict = Depends(current_user)) -> dict:
+    with uow(user["id"]) as ctx:
+        return folders.rename_folder(ctx, folder_id, body.name)
+
+
+@router.delete("/folders/{folder_id}", status_code=204)
+def delete_folder(folder_id: str, user: dict = Depends(current_user)) -> None:
+    with uow(user["id"]) as ctx:
+        folders.delete_folder(ctx, folder_id)
+
+
+@router.put("/projects/{project_id}/folder")
+def set_project_folder(
+    project_id: str, body: ProjectFolderIn, user: dict = Depends(current_user)
+) -> dict:
+    with uow(user["id"]) as ctx:
+        return folders.set_project_folder(ctx, project_id, body.folder_id)
+
+
+@router.get("/projects/{project_id}/phases")
+def list_phases(project_id: str, user: dict = Depends(current_user)) -> dict:
+    with uow(user["id"]) as ctx:
+        return phases.list_phases(ctx, project_id)
+
+
+@router.post("/projects/{project_id}/phases", status_code=201)
+def create_phase(project_id: str, body: PhaseIn, user: dict = Depends(current_user)) -> dict:
+    with uow(user["id"]) as ctx:
+        return phases.create_phase(ctx, project_id, body.name)
+
+
+@router.put("/projects/{project_id}/phases/order")
+def reorder_phases(project_id: str, body: PhaseOrderIn, user: dict = Depends(current_user)) -> dict:
+    with uow(user["id"]) as ctx:
+        return phases.reorder_phases(ctx, project_id, body.ids)
+
+
+@router.patch("/phases/{phase_id}")
+def rename_phase(phase_id: str, body: PhaseIn, user: dict = Depends(current_user)) -> dict:
+    with uow(user["id"]) as ctx:
+        return phases.rename_phase(ctx, phase_id, body.name)
+
+
+@router.delete("/phases/{phase_id}", status_code=204)
+def delete_phase(phase_id: str, user: dict = Depends(current_user)) -> None:
+    with uow(user["id"]) as ctx:
+        phases.delete_phase(ctx, phase_id)

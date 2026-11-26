@@ -1,5 +1,6 @@
 """Organograma: espaço da lotação = unidade; projetos sobem um nível por vez, sempre só leitura."""
 
+from datetime import date
 from pathlib import Path
 
 import pytest
@@ -10,7 +11,7 @@ from projeta.db import uow
 from projeta.errors import BadRequestError, ForbiddenError
 from projeta.identity import auth, workspaces
 from projeta.identity.access import project_access
-from projeta.work import comments, formal, org, projects, tasks
+from projeta.work import comments, formal, okrs, org, projects, tasks
 
 # Titulares da planilha (migração 019), como estão lá.
 HEADS = {
@@ -77,6 +78,14 @@ def test_espaco_da_lotacao_e_a_unidade_e_a_titular_e_gestora(org_tree):
     # Caminho completo na lotação também encontra a sigla.
     with uow(org_tree["dirau"]["id"]) as ctx:
         assert org.org_view(ctx, org_tree["ws_dirau"])["unit"] == "DIRAU"
+
+
+def test_organograma_inteiro_vem_com_a_unidade_de_cima_de_cada_uma(org_tree):
+    with uow(org_tree["disid"]["id"]) as ctx:
+        tree = {u["sigla"]: u for u in org.org_view(ctx, org_tree["ws_disid"])["tree"]}
+    assert tree["DISID"]["parent"] == "COTIN" and tree["DISID"]["has_space"]
+    assert tree["COTIN"]["parent"] == "COINT"
+    assert tree["PRESIDENCIA"]["parent"] is None
 
 
 def test_nada_sobe_sem_compartilhar(org_tree):
@@ -385,3 +394,144 @@ def test_direto_e_hierarquia_para_a_mesma_unidade_se_desfazem_separados(lateral)
         org.unshare_direct(ctx, t["ws_disid"], t["pid"], "COINT")
     assert not _sees(t["coint"], t["ws_coint"], t["pid"])
     assert _sees(t["cotin"], t["ws_cotin"], t["pid"])
+
+
+def _via(user: dict, ws: str, pid: str):
+    with uow(user["id"]) as ctx:
+        return {r["id"]: r for r in formal.portfolio(ctx, ws)}[pid]["via_unit"]
+
+
+def test_cada_nivel_ve_o_projeto_pela_unidade_filha_direta(org_tree):
+    """A COTIN agrupa por DISID; a COINT, pela COTIN (não pela DISID): só os filhos diretos."""
+    t = org_tree
+    with uow(t["disid"]["id"]) as ctx:
+        org.share_up(ctx, t["ws_disid"], t["pid"])
+    with uow(t["cotin"]["id"]) as ctx:
+        org.share_up(ctx, t["ws_cotin"], t["pid"])
+    assert _via(t["cotin"], t["ws_cotin"], t["pid"]) == {"sigla": "DISID", "label": "DISID"}
+    assert _via(t["coint"], t["ws_coint"], t["pid"]) == {"sigla": "COTIN", "label": "COTIN"}
+    assert _via(t["disid"], t["ws_disid"], t["pid"]) is None  # projeto do próprio espaço
+
+
+def test_direto_de_fora_da_linha_fica_sem_unidade_filha(lateral):
+    t = lateral
+    with uow(t["disid"]["id"]) as ctx:
+        org.share_direct(ctx, t["ws_disid"], t["pid"], "GEPES")
+    assert _via(t["gepes"], t["ws_gepes"], t["pid"]) is None  # a interface usa o espaço de origem
+
+
+# ---------- OKRs sobem como os projetos: um nível por vez, repassáveis, só leitura ----------
+
+TZ = "America/Sao_Paulo"
+
+
+@pytest.fixture
+def okr_tree(org_tree):
+    t = org_tree
+    t["period"] = okrs.quarter_of(date.today())
+    with uow(t["disid"]["id"]) as ctx:
+        t["oid"] = okrs.create_objective(ctx, t["ws_disid"], "Rede estável", t["period"])["id"]
+        t["kr"] = okrs.create_key_result(
+            ctx,
+            t["oid"],
+            {"title": "Disponibilidade", "owner_id": t["disid"]["id"], "target_value": 99},
+        )["id"]
+        okrs.check_in(ctx, t["kr"], 50, "at_risk", "Troca de switch", TZ)
+    return t
+
+
+def _received(user: dict, ws: str) -> list[dict]:
+    with uow(user["id"]) as ctx:
+        return okrs.list_okrs(ctx, ws, TZ)["received"]["objectives"]
+
+
+def _ids(user: dict, ws: str) -> set[str]:
+    return {o["id"] for o in _received(user, ws)}
+
+
+def test_okr_nada_sobe_sem_compartilhar(okr_tree):
+    t = okr_tree
+    assert _ids(t["cotin"], t["ws_cotin"]) == set()
+    with uow(t["cotin"]["id"]) as ctx, pytest.raises(ForbiddenError):
+        okrs.list_checkins(ctx, t["kr"])
+
+
+def test_okr_cotin_ve_em_leitura_conforme_a_matriz(okr_tree):
+    t = okr_tree
+    with uow(t["disid"]["id"]) as ctx:
+        org.share_objective_up(ctx, t["ws_disid"], t["oid"])
+        v = org.org_view(ctx, t["ws_disid"])
+    assert [o["shared_up"] for o in v["own_objectives"] if o["id"] == t["oid"]] == [True]
+    [o] = _received(t["cotin"], t["ws_cotin"])
+    assert o["shared_from"] == "DISID" and o["progress"] == 51
+    [k] = o["key_results"]
+    assert k["can_checkin"] is False
+    assert t["oid"] in _ids(t["cotin_ger"], t["ws_cotin"])  # Gerente tem org.view_shared
+    assert _ids(t["cotin_leitor"], t["ws_cotin"]) == set()  # Leitor não, por padrão
+    assert _ids(t["coint"], t["ws_coint"]) == set()  # não pula nível
+    with uow(t["cotin"]["id"]) as ctx:
+        board = okrs.list_okrs(ctx, t["ws_cotin"], TZ)
+        assert board["objectives"] == [] and board["summary"]["objectives"] == 0
+        assert [c["note"] for c in okrs.list_checkins(ctx, t["kr"])] == ["Troca de switch"]
+        with pytest.raises(ForbiddenError):
+            okrs.check_in(ctx, t["kr"], 60, "on_track")
+        with pytest.raises(ForbiddenError):
+            okrs.update_objective(ctx, t["oid"], {"title": "Mudar"})
+        with pytest.raises(ForbiddenError):
+            okrs.create_key_result(ctx, t["oid"], {"title": "Intruso"})
+        with pytest.raises(ForbiddenError):
+            okrs.delete_key_result(ctx, t["kr"])
+    with uow(t["coint"]["id"]) as ctx, pytest.raises(ForbiddenError):
+        okrs.list_checkins(ctx, t["kr"])
+
+
+def test_okr_cotin_repassa_e_desfazer_desce_em_cascata(okr_tree):
+    t = okr_tree
+    with uow(t["disid"]["id"]) as ctx:
+        org.share_objective_up(ctx, t["ws_disid"], t["oid"])
+    with uow(t["cotin"]["id"]) as ctx:
+        org.share_objective_up(ctx, t["ws_cotin"], t["oid"])  # repassa à COINT
+        [r] = org.org_view(ctx, t["ws_cotin"])["received_objectives"]
+        assert r["origin_unit"] == "DISID" and r["shared_up"]
+    assert t["oid"] in _ids(t["coint"], t["ws_coint"])
+    with uow(t["cotin"]["id"]) as ctx:
+        org.unshare_objective_up(ctx, t["ws_cotin"], t["oid"])
+    assert _ids(t["coint"], t["ws_coint"]) == set()
+    assert t["oid"] in _ids(t["cotin"], t["ws_cotin"])
+    with uow(t["cotin"]["id"]) as ctx:
+        org.share_objective_up(ctx, t["ws_cotin"], t["oid"])
+    with uow(t["disid"]["id"]) as ctx:
+        org.unshare_objective_up(ctx, t["ws_disid"], t["oid"])
+    assert _ids(t["cotin"], t["ws_cotin"]) == set()
+    assert _ids(t["coint"], t["ws_coint"]) == set()
+
+
+def test_so_o_gestor_de_quem_tem_o_objetivo_compartilha(okr_tree):
+    t = okr_tree
+    with uow(t["disid2"]["id"]) as ctx, pytest.raises(ForbiddenError):
+        org.share_objective_up(ctx, t["ws_disid"], t["oid"])  # Gerente não é Gestor
+    with uow(t["dirau"]["id"]) as ctx, pytest.raises(ForbiddenError):
+        org.share_objective_up(ctx, t["ws_dirau"], t["oid"])  # DIRAU não tem o objetivo
+    with uow(t["cotin"]["id"]) as ctx, pytest.raises(ForbiddenError):
+        org.share_objective_up(ctx, t["ws_cotin"], t["oid"])  # COTIN ainda não recebeu
+    with uow(t["dirau"]["id"]) as ctx, pytest.raises(ForbiddenError):
+        org.share_objective_up(ctx, t["ws_disid"], t["oid"])  # não é membro de DISID
+    with uow(t["disid"]["id"]) as ctx, pytest.raises(ForbiddenError):
+        org.share_objective_up(ctx, t["ws_disid"], "nao-e-uuid")
+
+
+def test_rota_compartilha_objetivo(okr_tree, monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from projeta.api.app import app
+    from projeta.identity import auth
+
+    t = okr_tree
+    c = TestClient(app)
+    c.headers["x-requested-with"] = "projeta-web"
+    monkeypatch.setattr(auth, "user_from_token", lambda ctx, tok: t["disid"] | {"timezone": TZ})
+    base = f"/api/v1/workspaces/{t['ws_disid']}/org/objective-shares"
+    assert c.post(base, json={"objective_id": t["oid"]}).status_code == 204
+    assert t["oid"] in _ids(t["cotin"], t["ws_cotin"])
+    assert c.delete(f"{base}/{t['oid']}").status_code == 204
+    assert _ids(t["cotin"], t["ws_cotin"]) == set()

@@ -10,6 +10,7 @@ from ..deps import current_user
 from ..schemas import (
     DirectShareIn,
     InviteIn,
+    ObjectiveShareIn,
     PermissionsIn,
     PrefsIn,
     RoleIn,
@@ -157,6 +158,22 @@ def unshare_direct(
 ) -> None:
     with uow(user["id"]) as ctx:
         org.unshare_direct(ctx, workspace_id, project_id, unit)
+
+
+@router.post("/workspaces/{workspace_id}/org/objective-shares", status_code=204)
+def share_objective(
+    workspace_id: str, body: ObjectiveShareIn, user: dict = Depends(current_user)
+) -> None:
+    with uow(user["id"]) as ctx:
+        org.share_objective_up(ctx, workspace_id, body.objective_id)
+
+
+@router.delete("/workspaces/{workspace_id}/org/objective-shares/{objective_id}", status_code=204)
+def unshare_objective(
+    workspace_id: str, objective_id: str, user: dict = Depends(current_user)
+) -> None:
+    with uow(user["id"]) as ctx:
+        org.unshare_objective_up(ctx, workspace_id, objective_id)
 
 
 @router.post("/workspaces/{workspace_id}/org/share-all")

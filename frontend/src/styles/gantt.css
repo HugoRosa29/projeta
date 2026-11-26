@@ -74,11 +74,14 @@
 .g-bar.no-start { border-style: dashed; background: color-mix(in srgb, var(--azul) 8%, var(--surface)); box-shadow: none; }
 .g-bar.late:not(.s-done) { border-color: var(--alerta); }
 .g-bar.conflict { outline: 2px solid var(--alerta); outline-offset: 2px; }
-.g-progress { position: absolute; inset: 0 auto 0 0; background: var(--azul); opacity: 0.85; }
+.g-progress { position: absolute; inset: 0 auto 0 0; background: var(--azul); }
 .g-bar.s-blocked .g-progress { background: var(--alerta); }
-.g-bar-text { position: relative; padding: 0 7px; font-family: var(--mono); font-size: 0.625rem; white-space: nowrap; overflow: hidden; color: var(--azul-deep); }
+/* Texto em --ink (não --azul-deep, que é escuro também no tema escuro); a cópia .on-fill
+   usa --surface, que contrasta com o preenchimento --azul/--alerta nos dois temas. */
+.g-bar-text { position: absolute; inset: 0; display: flex; align-items: center; padding: 0 7px; font-family: var(--mono); font-size: 0.6875rem; font-weight: 600; white-space: nowrap; overflow: hidden; color: var(--ink); }
+.g-bar-text.on-fill { color: var(--surface); }
 .g-bar.s-done .g-bar-text { color: var(--on-verde); }
-.g-bar.s-blocked .g-bar-text { color: var(--alerta); }
+.g-bar.s-blocked .g-bar-text:not(.on-fill) { color: color-mix(in srgb, var(--alerta) 70%, var(--ink)); }
 .g-bar.milestone { width: 14px; height: 14px; margin-top: -7px; border-radius: 3px; transform: rotate(45deg); border: 2px solid var(--dourado-deep); background: var(--dourado); }
 .g-row:hover .g-bar { box-shadow: 0 2px 8px color-mix(in srgb, var(--azul) 30%, transparent); }
 
@@ -141,3 +144,65 @@
 .g-key.milestone { width: 10px; transform: rotate(45deg); border-color: var(--dourado-deep); background: var(--dourado); }
 
 @media (prefers-reduced-motion: reduce) { .g-row, .g-bar, .g-edge-line, .tl-handle { transition: none; } }
+
+/* ---------- Linha de base ----------
+   O atual continua sendo a barra cheia; o planejado é uma faixa listrada fina logo abaixo dela,
+   na mesma linha, para o olho comparar início e fim sem trocar de tela. */
+.g-basectl { display: inline-flex; align-items: center; gap: 2px; }
+.g-basectl > .btn[aria-pressed="true"] { background: var(--ink); color: var(--surface); }
+.g-baseselect { min-height: 34px; max-width: 240px; padding: 0 28px 0 12px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface); font: inherit; font-size: 0.8125rem; color: var(--ink); text-overflow: ellipsis; }
+.g-baseselect:focus { border-color: var(--azul); outline: none; box-shadow: 0 0 0 3px color-mix(in srgb, var(--azul) 25%, transparent); }
+
+.g-basebar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; padding: 8px 12px; border-radius: var(--radius-sm); background: color-mix(in srgb, var(--paper-deep) 55%, var(--surface)); font-size: 0.8125rem; }
+.g-base-term { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.g-base-planned { color: var(--ink-60); text-decoration: line-through; text-decoration-color: color-mix(in srgb, var(--ink-60) 60%, transparent); }
+.g-chips { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.g-chip, .g-chip-static { display: inline-flex; align-items: center; gap: 6px; min-height: 30px; padding: 0 11px; border-radius: 999px; font: inherit; font-size: 0.8125rem; color: var(--ink); }
+.g-chip { border: 1px solid var(--line); background: var(--surface); cursor: pointer; transition: background 0.15s, border-color 0.15s; }
+.g-chip::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--ink-60); }
+.g-chip.late::before { background: var(--alerta); }
+.g-chip.early::before { background: var(--verde); }
+.g-chip.added::before { background: var(--azul); }
+.g-chip.missing::before { background: transparent; border: 1.5px dashed var(--ink-60); }
+.g-chip:hover { border-color: var(--ink-60); }
+.g-chip[aria-pressed="true"] { border-color: var(--ink); background: var(--ink); color: var(--surface); }
+.g-chip-static { color: var(--ink-60); }
+
+.g-var { display: inline-block; padding: 0 6px; border-radius: 999px; font-family: var(--mono); font-size: 0.625rem; font-weight: 700; line-height: 16px; background: var(--paper-deep); color: var(--ink-60); }
+.g-var.late { background: var(--alerta-tint); color: var(--alerta); }
+.g-var.early { background: var(--verde-tint); color: var(--verde-deep); }
+.g-var.added { background: var(--azul-tint); color: var(--azul); }
+
+/* Com comparação, a barra atual sobe um pouco para dar lugar à faixa planejada. */
+.g-based .g-bar:not(.milestone) { height: 16px; margin-top: -11px; }
+.g-based .g-bar.milestone { margin-top: -10px; }
+.g-base { position: absolute; top: calc(50% + 6px); height: 5px; z-index: 1; border-radius: 2px; pointer-events: none;
+  background: repeating-linear-gradient(135deg, color-mix(in srgb, var(--ink-60) 70%, transparent) 0 3px, color-mix(in srgb, var(--ink-60) 25%, transparent) 3px 6px); }
+.g-base.phase { top: calc(50% + 5px); height: 4px; }
+.g-base.solo { top: 50%; height: 12px; margin-top: -6px; pointer-events: auto; border: 1.5px dashed var(--ink-60); background: color-mix(in srgb, var(--ink-60) 12%, transparent); border-radius: 5px; }
+.g-base-ms { position: absolute; top: calc(50% + 3px); width: 9px; height: 9px; z-index: 1; transform: rotate(45deg); border: 1.5px dashed var(--ink-60); background: var(--surface); pointer-events: none; }
+.g-base-end { stroke: var(--ink-60); stroke-width: 1.5; stroke-dasharray: 2 4; }
+.g-base-pill { position: absolute; bottom: -9px; transform: translateX(-50%); padding: 1px 7px; border-radius: 999px; background: var(--ink-60); color: var(--surface); font-size: 0.625rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; z-index: 2; white-space: nowrap; }
+.g-missing .g-label { color: var(--ink-60); }
+.g-missing-title { cursor: default; color: var(--ink-60); text-decoration: line-through; }
+.g-missing-title:hover { color: var(--ink-60); text-decoration: line-through; }
+.g-key.base { border: 0; height: 5px; background: repeating-linear-gradient(135deg, color-mix(in srgb, var(--ink-60) 70%, transparent) 0 3px, color-mix(in srgb, var(--ink-60) 25%, transparent) 3px 6px); }
+
+/* Diálogo das linhas de base. */
+.bl-intro { margin: 0 0 14px; font-size: 0.875rem; line-height: 1.5; }
+.bl-list { list-style: none; margin: 0 0 18px; padding: 0; display: grid; gap: 6px; }
+.bl-item { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--radius-sm); }
+.bl-item.on { border-color: var(--ink); background: color-mix(in srgb, var(--paper-deep) 50%, var(--surface)); }
+.bl-item-main { display: grid; gap: 2px; min-width: 0; }
+.bl-item-main strong { font-size: 0.9375rem; overflow-wrap: anywhere; }
+.bl-note { font-size: 0.8125rem; color: var(--ink-60); overflow-wrap: anywhere; }
+.bl-item-actions { display: flex; align-items: center; gap: 4px; flex: none; }
+.bl-item-actions .btn[aria-pressed="true"] { color: var(--azul); }
+.bl-del { width: 36px; height: 36px; color: var(--ink-60); }
+.bl-del:hover { color: var(--alerta); }
+.bl-confirm { font-size: 0.8125rem; font-weight: 600; color: var(--alerta); }
+.bl-form { border-top: 1px solid var(--line); padding-top: 16px; }
+.bl-form h3 { margin: 0 0 4px; font-size: 1rem; }
+.bl-form > .muted { margin: 0 0 12px; font-size: 0.8125rem; }
+.bl-readonly { margin: 0; font-size: 0.8125rem; }
+@media (max-width: 560px) { .bl-item { flex-wrap: wrap; } }

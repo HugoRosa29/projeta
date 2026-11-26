@@ -21,7 +21,7 @@ it("salva prioridade urgente e tags sem apagar etiquetas anteriores", async () =
   const patch = vi.spyOn(api, "patch").mockResolvedValue(task);
   render(<QueryClientProvider client={client()}><TaskDialog taskId="t1" onClose={() => {}} /></QueryClientProvider>);
   const user = userEvent.setup();
-  await user.selectOptions(await screen.findByLabelText("Prioridade"), "urgent");
+  await user.click(await screen.findByRole("radio", { name: "Urgente" }));
   await user.type(screen.getByLabelText("Tags"), ", revisão, revisão");
   await user.click(screen.getByRole("button", { name: "Salvar" }));
   expect(patch).toHaveBeenCalledWith("/tasks/t1", { expected_version: 3, priority: "urgent", labels: ["EXISTENTE", "REVISÃO"] });
@@ -31,7 +31,8 @@ it("impede edição das etiquetas para acesso somente leitura", async () => {
   vi.spyOn(api, "get").mockResolvedValue({ task, can_write: false, depends_on: [], blocks: [] });
   render(<QueryClientProvider client={client()}><TaskDialog taskId="t1" onClose={() => {}} /></QueryClientProvider>);
   expect(await screen.findByLabelText("Tags")).toBeDisabled();
-  expect(screen.getByLabelText("Prioridade")).toBeDisabled();
+  expect(screen.getByRole("group", { name: "Prioridade" })).toBeDisabled();
+  expect(screen.getByRole("radio", { name: "Urgente" })).toBeDisabled();
 });
 
 it("tarefa de projeto escolhe a sprint; encerradas não aparecem como destino", async () => {
@@ -55,4 +56,31 @@ it("tarefa de projeto escolhe a sprint; encerradas não aparecem como destino", 
   await user.selectOptions(select, "s2");
   await user.click(screen.getByRole("button", { name: "Salvar" }));
   expect(patch).toHaveBeenCalledWith("/tasks/t1", { expected_version: 3, sprint_id: "s2" });
+});
+
+it("tags viram fichas: Enter adiciona, o X remove, e o estado troca com um clique", async () => {
+  vi.spyOn(api, "get").mockResolvedValue({ task, can_write: true, depends_on: [], blocks: [] });
+  const patch = vi.spyOn(api, "patch").mockResolvedValue(task);
+  render(<QueryClientProvider client={client()}><TaskDialog taskId="t1" onClose={() => {}} /></QueryClientProvider>);
+  const user = userEvent.setup();
+  await user.type(await screen.findByLabelText("Tags"), "gov.br{Enter}");
+  expect(screen.getByText("GOV.BR")).toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: "Remover tag EXISTENTE" }));
+  await user.click(screen.getByRole("radio", { name: "Em andamento" }));
+  await user.click(screen.getByRole("button", { name: "Salvar" }));
+  expect(patch).toHaveBeenCalledWith("/tasks/t1", { expected_version: 3, status: "doing", labels: ["GOV.BR"] });
+});
+
+it("sem alteração, Salvar fica indisponível; com alteração, fechar pede confirmação", async () => {
+  vi.spyOn(api, "get").mockResolvedValue({ task, can_write: true, depends_on: [], blocks: [] });
+  const onClose = vi.fn();
+  const ask = vi.spyOn(window, "confirm").mockReturnValue(false);
+  render(<QueryClientProvider client={client()}><TaskDialog taskId="t1" onClose={onClose} /></QueryClientProvider>);
+  const user = userEvent.setup();
+  expect(await screen.findByRole("button", { name: "Salvar" })).toBeDisabled();
+  await user.type(screen.getByLabelText("Descrição"), "Contexto");
+  expect(screen.getByText("Alterações não salvas")).toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: "Cancelar" }));
+  expect(ask).toHaveBeenCalled();
+  expect(onClose).not.toHaveBeenCalled();
 });

@@ -1,9 +1,12 @@
 import { useQuery } from "@tanstack/react-query";
+import { ImagePlus, Trash2 } from "lucide-react";
+import { useRef } from "react";
 import { Link } from "react-router";
 import { ErrorBox, Loading } from "../../components/ui";
 import { ROLE_LABEL, type Role } from "../../domain/types";
 import { api } from "../../services/api";
 import { useSession } from "../../app/session";
+import { photoUrl, usePhotoActions } from "./photo";
 
 export interface Profile {
   id: string;
@@ -13,10 +16,17 @@ export interface Profile {
   allotment: string | null;
   timezone: string;
   created_at: string;
+  photo_version: string | null;
   origin: "gia" | "local";
   unit: { sigla: string; label: string } | null;
   heads_of: { sigla: string; label: string }[];
   workspaces: { id: string; name: string; kind: "personal" | "team"; org_unit: string | null; role: Role }[];
+}
+
+/** Primeira e última iniciais, para o lugar da foto quando não há uma. */
+function initials(name: string): string {
+  const parts = name.trim().split(/\s+/);
+  return ((parts[0]?.[0] ?? "") + (parts.length > 1 ? parts[parts.length - 1][0] : "")).toUpperCase();
 }
 
 /** Mês e ano por extenso a partir do instante UTC do cadastro, no fuso da pessoa. */
@@ -27,6 +37,8 @@ function since(iso: string, timeZone: string): string {
 export function ProfilePage() {
   const { workspace, setWorkspaceId } = useSession();
   const q = useQuery({ queryKey: ["me", "profile"], queryFn: () => api.get<Profile>("/me/profile") });
+  const { upload, remove } = usePhotoActions();
+  const fileRef = useRef<HTMLInputElement>(null);
 
   if (q.isLoading) return <Loading label="Carregando seu perfil…" />;
   if (q.isError) return <ErrorBox error={q.error} onRetry={() => q.refetch()} />;
@@ -42,9 +54,35 @@ export function ProfilePage() {
   return (
     <>
       <div className="page-head">
+        <div className="profile-photo">
+          {p.photo_version ? <img src={photoUrl(p.photo_version)} alt="Sua foto de perfil" /> : <span aria-hidden>{initials(p.name)}</span>}
+        </div>
         <div>
           <p className="eyebrow">Perfil</p>
           <h1>{p.name}</h1>
+          <div className="profile-photo-actions">
+            <input
+              ref={fileRef}
+              type="file"
+              accept="image/png,image/jpeg,image/webp"
+              className="sr-only"
+              tabIndex={-1}
+              aria-label="Escolher foto de perfil"
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                e.target.value = "";
+                if (f) upload.mutate(f);
+              }}
+            />
+            <button className="btn btn-line btn-sm" disabled={upload.isPending} onClick={() => fileRef.current?.click()}>
+              <ImagePlus size={16} aria-hidden /> {upload.isPending ? "Enviando…" : p.photo_version ? "Trocar foto" : "Adicionar foto"}
+            </button>
+            {p.photo_version && (
+              <button className="btn btn-ghost btn-sm" disabled={remove.isPending} onClick={() => remove.mutate()}>
+                <Trash2 size={16} aria-hidden /> Remover foto
+              </button>
+            )}
+          </div>
         </div>
       </div>
 

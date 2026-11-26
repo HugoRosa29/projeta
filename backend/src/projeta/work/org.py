@@ -10,6 +10,8 @@ Regras (ADR 0004):
 - Compartilhamento direto (ADR 0008): o Gestor do espaço dono também compartilha com qualquer
   unidade, fora da hierarquia. Só o dono decide: quem recebe assim não repassa adiante. Cada
   caminho (`kind` 'up' ou 'direct') se desfaz separado.
+- Objetivos de OKR (com seus KRs) sobem pela mesma regra dos projetos: um nível por vez,
+  repassáveis, recolhimento em cascata, só leitura e visíveis conforme `org.view_shared`.
 """
 
 from __future__ import annotations
@@ -58,6 +60,9 @@ def org_view(ctx: Ctx, workspace_id: str) -> dict:
             "received": [],
             "children": [],
             "units": [],
+            "tree": [],
+            "own_objectives": [],
+            "received_objectives": [],
             "can_share": False,
         }
     parent = _parent(ctx, unit)
@@ -88,6 +93,27 @@ def org_view(ctx: Ctx, workspace_id: str) -> dict:
                ORDER BY ow.org_unit, p.name""",
             params,
         )
+    own_objectives = ctx.all(
+        """SELECT o.id, o.title, o.period,
+              EXISTS (SELECT 1 FROM objective_shares s WHERE s.objective_id = o.id
+                      AND s.unit = %(parent)s) AS shared_up
+            FROM objectives o WHERE o.workspace_id = %(ws)s
+            ORDER BY o.period DESC, o.position, o.created_at""",
+        params,
+    )
+    received_objectives = []
+    if me.can("org.view_shared"):
+        received_objectives = ctx.all(
+            """SELECT o.id, o.title, o.period, ow.name AS origin_workspace,
+                 ow.org_unit AS origin_unit,
+                 EXISTS (SELECT 1 FROM objective_shares s2 WHERE s2.objective_id = o.id
+                         AND s2.unit = %(parent)s) AS shared_up
+               FROM objective_shares s JOIN objectives o ON o.id = s.objective_id
+               JOIN workspaces ow ON ow.id = o.workspace_id
+               WHERE s.unit = %(unit)s
+               ORDER BY o.period DESC, ow.org_unit, o.title""",
+            params,
+        )
     children = ctx.all(
         """SELECT u.sigla, u.label, w.name AS workspace_name, (w.id IS NOT NULL) AS has_space
            FROM org_units u LEFT JOIN workspaces w ON w.org_unit = u.sigla
@@ -101,14 +127,23 @@ def org_view(ctx: Ctx, workspace_id: str) -> dict:
         "AND sigla IS DISTINCT FROM %(parent)s ORDER BY sigla",
         params,
     )
+    # O organograma inteiro, para o desenho em Configurações: cada unidade aponta para a de cima.
+    tree = ctx.all(
+        """SELECT u.sigla, u.label, u.parent, (w.id IS NOT NULL) AS has_space
+           FROM org_units u LEFT JOIN workspaces w ON w.org_unit = u.sigla
+           ORDER BY u.sigla"""
+    )
     return {
         "unit": unit,
         "units": units,
+        "tree": tree,
         "chain": _chain(ctx, unit),
         "parent": parent,
         "own": own,
         "received": received,
         "children": children,
+        "own_objectives": own_objectives,
+        "received_objectives": received_objectives,
         "can_share": can_share,
     }
 
@@ -234,6 +269,52 @@ def unshare_direct(ctx: Ctx, workspace_id: str, project_id: str, target: str) ->
     )
     log_activity(
         ctx, workspace_id, "project.unshared", project_id, data={"unit": target, "direct": True}
+    )
+
+
+# ---------- objetivos (OKR) ----------
+
+
+def _holds_objective(ctx: Ctx, workspace_id: str, unit: str, objective_id: str) -> str | None:
+    """Espaço dono do objetivo, se este espaço é o dono ou a unidade dele o recebeu."""
+    if not is_uuid(objective_id):
+        return None
+    row = ctx.one(
+        "SELECT o.workspace_id FROM objectives o WHERE o.id = %s AND (o.workspace_id = %s "
+        "OR EXISTS (SELECT 1 FROM objective_shares s WHERE s.objective_id = o.id AND s.unit = %s))",
+        (objective_id, workspace_id, unit),
+    )
+    return str(row["workspace_id"]) if row else None
+
+
+def share_objective_up(ctx: Ctx, workspace_id: str, objective_id: str) -> None:
+    unit, parent = _gestor_unit(ctx, workspace_id)
+    owner = _holds_objective(ctx, workspace_id, unit, objective_id)
+    if not owner:
+        raise ForbiddenError()
+    ctx.run(
+        "INSERT INTO objective_shares(objective_id, unit, from_unit, shared_by) "
+        "VALUES (%s,%s,%s,%s) ON CONFLICT DO NOTHING",
+        (objective_id, parent, unit, ctx.user_id),
+    )
+    log_activity(
+        ctx, owner, "objective.shared", data={"objective_id": objective_id, "unit": parent}
+    )
+
+
+def unshare_objective_up(ctx: Ctx, workspace_id: str, objective_id: str) -> None:
+    """Desfaz o compartilhamento deste nível e tudo o que foi repassado acima dele."""
+    unit, _parent_unit = _gestor_unit(ctx, workspace_id)
+    owner = _holds_objective(ctx, workspace_id, unit, objective_id)
+    if not owner:
+        raise ForbiddenError()
+    above = [u["sigla"] for u in _chain(ctx, unit)[1:]]
+    ctx.run(
+        "DELETE FROM objective_shares WHERE objective_id = %s AND unit = ANY(%s)",
+        (objective_id, above),
+    )
+    log_activity(
+        ctx, owner, "objective.unshared", data={"objective_id": objective_id, "unit": unit}
     )
 
 

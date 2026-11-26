@@ -31,7 +31,7 @@ O guia do monday organiza OKRs assim: **objetivos** agrupam **resultados-chave**
 - O assistente ainda não consulta nem propõe check-ins de OKR. Isso é mudança em `assistant/tools.py`, que cabe a uma pessoa decidir (AGENTS.md §6).
 - "Exportar/importar espaço" ainda não leva os OKRs.
 - O lembrete é só visual, na home e no painel, sem notificação, porque ainda não há agendador (roadmap, fase 3).
-- Os OKRs são por espaço e não sobem pelo organograma: a COTIN não vê os OKRs da DISID. O alinhamento entre níveis (objetivo-pai) fica para uma próxima decisão.
+- Os objetivos podem subir pelo organograma, só leitura, pela mesma regra dos projetos ([ADR 0009](0009-okrs-sobem-pelo-organograma.md)). O alinhamento entre níveis (objetivo-pai) fica para uma próxima decisão.
 - A home deixa de ser igual para todos. Quem é Membro e queria o panorama em destaque precisa de um clique a mais.
 
 ## Alternativas descartadas

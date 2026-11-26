@@ -16,7 +16,7 @@ const ws = (id: string, name: string, kind: Workspace["kind"]): Workspace => ({
 const profile = (over: Partial<Profile> = {}): Profile => ({
   id: "u1", name: "Daniel Reis Santos", email: "daniel@terracap.df.gov.br", matricula: "12345",
   allotment: "DIRAU - DIRAU - DIVISÃO DE INFRAESTRUT DE REDES E ATEND AO USUARIO", timezone: "America/Sao_Paulo",
-  created_at: "2026-08-10T13:00:00Z", origin: "gia", unit: { sigla: "DIRAU", label: "DIRAU" },
+  created_at: "2026-08-10T13:00:00Z", photo_version: null, origin: "gia", unit: { sigla: "DIRAU", label: "DIRAU" },
   heads_of: [{ sigla: "DIRAU", label: "DIRAU" }],
   workspaces: [
     { id: "p", name: "Espaço de Daniel", kind: "personal", org_unit: null, role: "admin" },
@@ -58,4 +58,23 @@ it("conta local explica a falta de lotação", async () => {
   expect(await screen.findByText("Sem matrícula (conta local)")).toBeInTheDocument();
   expect(screen.getByText("Sem unidade")).toBeInTheDocument();
   expect(screen.queryByText("Titular de")).not.toBeInTheDocument();
+});
+
+it("sem foto mostra as iniciais e oferece adicionar; com foto oferece trocar e remover", async () => {
+  vi.spyOn(api, "get").mockResolvedValue(profile());
+  show();
+  expect(await screen.findByText("DS")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: /Adicionar foto/ })).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: /Remover foto/ })).not.toBeInTheDocument();
+});
+
+it("com foto mostra a imagem versionada e envia a remoção", async () => {
+  vi.spyOn(api, "get").mockResolvedValue(profile({ photo_version: "2026-11-25T12:00:00Z" }));
+  const del = vi.spyOn(api, "del").mockResolvedValue(undefined);
+  show();
+  const img = await screen.findByRole("img", { name: "Sua foto de perfil" });
+  expect(img.getAttribute("src")).toBe("/api/v1/me/photo?v=2026-11-25T12%3A00%3A00Z");
+  expect(screen.getByRole("button", { name: /Trocar foto/ })).toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: /Remover foto/ }));
+  expect(del).toHaveBeenCalledWith("/me/photo");
 });

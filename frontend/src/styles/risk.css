@@ -1,0 +1,274 @@
+/* ---------- Aba Riscos do projeto (RisksPanel.tsx) e gráfico de rosca (Donut.tsx) ----------
+   Nível do risco é uma escala de estado (baixo → crítico): reaproveita os tons de situação do
+   panorama e acrescenta o laranja de "alto". O nível sempre vai escrito junto (selo, legenda e
+   rótulo acessível da célula) — a cor nunca carrega o sentido sozinha.
+   Categoria e situação são identidades: usam as quatro primeiras cores categóricas validadas
+   (ordem fixa; separação para daltonismo conferida entre vizinhas, nos dois modos). */
+:root {
+  --risk-low: var(--chart-ok);
+  --risk-moderate: var(--chart-warn);
+  --risk-high: #d9711c;
+  --risk-critical: var(--chart-bad);
+  --risk-on-low: var(--chart-on-ok);
+  --risk-on-moderate: var(--chart-on-warn);
+  --risk-on-high: #1d2420;
+  --risk-on-critical: var(--chart-on-bad);
+  --cat-1: #257de0;
+  --cat-2: #f47230;
+  --cat-3: #00b894;
+  --cat-4: #f2a600;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --risk-high: #e6743a;
+    --risk-on-high: #0e1411;
+    --cat-1: #338ced;
+    --cat-2: #e76624;
+    --cat-3: #00a888;
+    --cat-4: #d28e05;
+  }
+}
+:root[data-theme="dark"] {
+  --risk-high: #e6743a;
+  --risk-on-high: #0e1411;
+  --cat-1: #338ced;
+  --cat-2: #e76624;
+  --cat-3: #00a888;
+  --cat-4: #d28e05;
+}
+
+.rk { display: grid; gap: 14px; min-width: 0; }
+.rk-toolbar { margin-bottom: 0; }
+.rk-toolbar .btn { flex: none; }
+
+/* Controle segmentado (tipo de risco) */
+.rk-seg { display: inline-flex; flex: none; padding: 3px; gap: 2px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface); }
+.rk-seg-opt { display: inline-flex; align-items: center; gap: 6px; min-height: 34px; padding: 0 14px; border-radius: 999px; font-size: 0.8125rem; font-weight: 600; color: var(--ink-60); cursor: pointer; }
+.rk-seg-opt:hover { color: var(--ink); }
+.rk-seg-opt.on { background: var(--verde-tint); color: var(--verde-deep); }
+.rk-seg-opt:has(input:focus-visible) { outline: 2px solid var(--dourado); outline-offset: 1px; }
+
+/* Indicadores: faixa fina (número à direita do rótulo) para sobrar altura para o registro. */
+.rk-kpis { display: grid; gap: 8px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 165px), 1fr)); }
+.rk-kpi { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 0 10px; min-height: 52px; padding: 6px 12px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-sm); color: inherit; font: inherit; text-align: left; }
+.rk-kpi .coord { grid-column: 1; line-height: 1.3; }
+.rk-kpi strong { grid-column: 2; grid-row: 1 / span 2; font: 700 1.5rem var(--display); line-height: 1; font-variant-numeric: tabular-nums; }
+.rk-kpi-note { grid-column: 1; font-size: 0.75rem; color: var(--ink-60); }
+.rk-kpi.alerta { border-color: color-mix(in srgb, var(--alerta) 45%, var(--line)); background: color-mix(in srgb, var(--alerta-tint) 55%, var(--surface)); }
+.rk-kpi.alerta strong { color: var(--alerta); }
+.rk-kpi.warn { border-color: color-mix(in srgb, var(--dourado) 45%, var(--line)); }
+.rk-kpi.warn strong { color: var(--dourado-deep); }
+.rk-kpi.zero strong { color: var(--ink-60); }
+.rk-kpi-btn { cursor: pointer; transition: border-color 120ms ease, background-color 120ms ease; }
+.rk-kpi-btn.alerta:hover { border-color: var(--alerta); }
+.rk-kpi-btn.warn:hover { border-color: var(--dourado); }
+.rk-kpi-btn.on { box-shadow: inset 0 0 0 2px currentColor; }
+.rk-kpi-btn:focus-visible { outline: 2px solid var(--dourado); outline-offset: 2px; }
+
+/* Registro em destaque à esquerda; matriz e distribuição numa coluna à direita. */
+.rk-body { display: grid; gap: 14px; min-width: 0; }
+@container projeto (min-width: 900px) { .rk-body { grid-template-columns: minmax(0, 1fr) minmax(320px, 380px); align-items: start; } }
+.rk-side { display: grid; gap: 14px; align-content: start; min-width: 0; }
+.rk-side .card + .card, .rk-body .card + .card { margin-top: 0; }
+.rk-side .card { padding: 14px 16px; }
+.rk-side h2, .rk-register h2 { display: flex; align-items: baseline; gap: 8px; margin: 0 0 10px; font-size: 1rem; }
+.rk-dist-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 10px; }
+.rk-dist-head h2 { margin: 0; }
+.rk-seg-sm .rk-seg-opt { min-height: 28px; padding: 0 10px; font-size: 0.75rem; }
+
+/* Matriz probabilidade × impacto */
+.rk-matrix { display: grid; grid-template-columns: auto minmax(0, 1fr); grid-template-rows: auto auto auto; gap: 4px 8px; }
+.rk-axis-y { grid-row: 1; writing-mode: vertical-rl; transform: rotate(180deg); align-self: center; font-size: 0.75rem; font-weight: 600; color: var(--ink-60); }
+.rk-axis-x { grid-column: 2; text-align: center; font-size: 0.75rem; font-weight: 600; color: var(--ink-60); }
+.rk-grid { display: grid; gap: 4px; }
+.rk-grid-row { display: grid; grid-template-columns: 74px repeat(5, minmax(0, 1fr)); gap: 4px; align-items: stretch; }
+.rk-tick { font-size: 0.6875rem; line-height: 1.15; color: var(--ink-60); align-self: center; }
+.rk-grid-row > .rk-tick:first-child { text-align: right; padding-right: 4px; }
+.rk-ticks-x .rk-tick { text-align: center; align-self: start; }
+.rk-cell { width: 100%; aspect-ratio: 1.5; min-height: 34px; border: 0; border-radius: 6px; font: 700 1rem var(--display); font-variant-numeric: tabular-nums; cursor: pointer; transition: transform 120ms ease, box-shadow 120ms ease; }
+/* Zona vazia: tinta leve do nível, para o mapa de calor ser lido mesmo sem riscos. */
+.rk-cell.lv-low { background: color-mix(in srgb, var(--risk-low) 16%, var(--surface)); }
+.rk-cell.lv-moderate { background: color-mix(in srgb, var(--risk-moderate) 18%, var(--surface)); }
+.rk-cell.lv-high { background: color-mix(in srgb, var(--risk-high) 18%, var(--surface)); }
+.rk-cell.lv-critical { background: color-mix(in srgb, var(--risk-critical) 18%, var(--surface)); }
+.rk-cell.has.lv-low { background: var(--risk-low); color: var(--risk-on-low); }
+.rk-cell.has.lv-moderate { background: var(--risk-moderate); color: var(--risk-on-moderate); }
+.rk-cell.has.lv-high { background: var(--risk-high); color: var(--risk-on-high); }
+.rk-cell.has.lv-critical { background: var(--risk-critical); color: var(--risk-on-critical); }
+.rk-cell:disabled { cursor: default; }
+.rk-cell.has:hover { transform: scale(1.06); }
+.rk-cell.on { box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--ink); }
+.rk-cell:focus-visible { outline: 2px solid var(--dourado); outline-offset: 2px; }
+.rk-legend { grid-column: 2; display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 6px 0 0; padding: 0; list-style: none; font-size: 0.75rem; color: var(--ink-60); }
+.rk-legend li { display: inline-flex; align-items: center; gap: 6px; }
+.rk-swatch { width: 12px; height: 12px; border-radius: 3px; }
+.rk-swatch.lv-low { background: var(--risk-low); }
+.rk-swatch.lv-moderate { background: var(--risk-moderate); }
+.rk-swatch.lv-high { background: var(--risk-high); }
+.rk-swatch.lv-critical { background: var(--risk-critical); }
+
+/* Selo de nível e pontuação */
+.rk-level { display: inline-flex; align-items: center; gap: 6px; padding: 2px 10px 2px 8px; border-radius: 999px; font-size: 0.75rem; font-weight: 600; white-space: nowrap; background: var(--paper-deep); color: var(--ink); font-variant-numeric: tabular-nums; }
+.rk-level::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
+.rk-level.lv-low::before { background: var(--risk-low); }
+.rk-level.lv-moderate::before { background: var(--risk-moderate); }
+.rk-level.lv-high::before { background: var(--risk-high); }
+.rk-level.lv-critical::before { background: var(--risk-critical); }
+
+/* Rosca */
+.donut { margin: 0; min-width: 0; }
+.donut-title { font-size: 0.8125rem; font-weight: 600; margin-bottom: 10px; }
+/* Rosca em cima e legenda embaixo, na largura toda: lado a lado, três roscas cortavam os rótulos. */
+.donut-body { display: grid; gap: 10px; justify-items: center; }
+.donut-svg { width: 120px; height: 120px; overflow: visible; }
+/* Legenda ao lado: cartão da coluna lateral, uma rosca por vez. */
+.donut.side .donut-title { margin-bottom: 6px; font-weight: 400; font-size: 0.75rem; color: var(--ink-60); }
+.donut.side .donut-body { grid-template-columns: 112px minmax(0, 1fr); justify-items: stretch; align-items: center; gap: 14px; }
+.donut.side .donut-svg { width: 112px; height: 112px; }
+.donut-track { fill: none; stroke: var(--paper-deep); stroke-width: 15; }
+.donut-seg { fill: none; stroke-width: 15; cursor: pointer; transition: opacity 120ms ease, stroke-width 120ms ease; }
+.donut-seg.dim { opacity: 0.28; }
+.donut-seg:hover { stroke-width: 18; }
+.donut-n { text-anchor: middle; font: 700 26px var(--display); fill: var(--ink); font-variant-numeric: tabular-nums; }
+.donut-sub { text-anchor: middle; font: 600 10px var(--body); fill: var(--ink-60); }
+.donut-legend { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; width: 100%; }
+.donut-key { display: grid; grid-template-columns: 10px minmax(0, 1fr) auto; align-items: center; gap: 8px; width: 100%; min-height: 28px; padding: 2px 8px; border: 1px solid transparent; border-radius: 8px; background: none; color: var(--ink); font: inherit; font-size: 0.8125rem; text-align: left; cursor: pointer; }
+.donut-key:hover:not(:disabled) { background: var(--paper-deep); }
+.donut-key.on { border-color: var(--ink); }
+.donut-key:disabled { cursor: default; color: var(--ink-60); }
+.donut-key:focus-visible { outline: 2px solid var(--dourado); outline-offset: 1px; }
+.donut-swatch { width: 10px; height: 10px; border-radius: 3px; }
+.donut-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.donut-v { font-variant-numeric: tabular-nums; font-weight: 600; }
+
+/* Registro */
+.rk-register { margin-top: 0; min-width: 0; }
+.rk-register > .rk-reg-head { flex: none; }
+.rk-reg-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 14px; margin-bottom: 10px; }
+.rk-reg-head h2 { margin: 0; }
+.rk-filter { display: inline-flex; align-items: center; gap: 8px; padding: 2px 4px 2px 12px; border-radius: 999px; background: var(--azul-tint); color: var(--azul); font-size: 0.8125rem; font-weight: 600; }
+.rk-check { display: inline-flex; align-items: center; gap: 8px; font-size: 0.8125rem; color: var(--ink-60); }
+.rk-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.rk-row-btn { display: grid; grid-template-columns: 104px minmax(0, 1fr) auto; align-items: center; gap: 12px; width: 100%; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface); color: inherit; font: inherit; text-align: left; cursor: pointer; transition: border-color 120ms ease, background-color 120ms ease; }
+.rk-row-btn:hover { border-color: color-mix(in srgb, var(--verde) 45%, var(--line)); }
+.rk-row-btn:focus-visible { outline: 2px solid var(--dourado); outline-offset: 1px; }
+.rk-row.is-done .rk-row-btn { opacity: 0.7; }
+.rk-row.is-done .rk-row-title { text-decoration: line-through; text-decoration-color: var(--ink-60); }
+.rk-code { font-family: var(--mono); font-size: 0.8125rem; color: var(--ink-60); }
+.rk-row-main { display: grid; gap: 2px; min-width: 0; }
+.rk-row-title { font-weight: 600; overflow-wrap: anywhere; }
+.rk-opp { vertical-align: -2px; color: var(--azul); }
+.rk-row-meta { display: flex; flex-wrap: wrap; gap: 2px 12px; font-size: 0.75rem; color: var(--ink-60); }
+.rk-row-meta > span { display: inline-flex; align-items: center; gap: 4px; }
+.rk-missing { font-style: normal; color: var(--dourado-deep); font-weight: 600; }
+.rk-late { color: var(--alerta); font-weight: 600; }
+.rk-st.st-open { background: var(--azul-tint); color: var(--azul); }
+.rk-st.st-responding { background: var(--dourado-tint); color: var(--dourado-deep); }
+.rk-st.st-occurred { background: var(--alerta-tint); color: var(--alerta); }
+.rk-st.st-closed { background: var(--verde-tint); color: var(--verde-deep); }
+/* Código em cima, nível embaixo: uma coluna estreita deixa a largura para o título. */
+.rk-row-lead { display: grid; gap: 4px; justify-items: start; }
+@container projeto (max-width: 640px) {
+  .rk-row-btn { grid-template-columns: minmax(0, 1fr) auto; }
+  .rk-row-btn .rk-row-lead { display: flex; align-items: center; gap: 8px; }
+  .rk-row-btn .rk-row-main { grid-column: 1 / -1; grid-row: 2; }
+}
+
+/* Diálogo de cadastro */
+.dialog.rk-dialog { width: min(760px, 100%); }
+.rk-fs { border: 0; margin: 0 0 6px; padding: 0 0 12px; min-width: 0; }
+.rk-fs + .rk-fs { border-top: 1px solid var(--line); padding-top: 14px; }
+.rk-step { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; padding: 0; font: 700 0.9375rem var(--display); }
+.rk-step span { display: inline-grid; place-items: center; width: 24px; height: 24px; border-radius: 50%; background: var(--verde-tint); color: var(--verde-deep); font-size: 0.8125rem; }
+.rk-kind { margin-bottom: 12px; }
+.rk-two { display: grid; gap: 0 14px; }
+@media (min-width: 640px) { .rk-two { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.rk-dialog .textarea { min-height: 76px; }
+.rk-dialog label .muted { font-weight: 400; }
+.rk-sentence { margin: -4px 0 14px; padding: 10px 12px; border-left: 3px solid var(--azul); border-radius: 0 var(--radius-sm) var(--radius-sm) 0; background: var(--azul-tint); font-size: 0.875rem; line-height: 1.5; }
+.rk-affects { border: 0; padding: 0; margin: 0 0 14px; min-width: 0; align-content: start; }
+.rk-affects legend { margin-bottom: 6px; padding: 0; }
+.rk-chips { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 6px; }
+.rk-chips .chip.on { background: var(--verde-tint); border-color: transparent; color: var(--verde-deep); font-weight: 600; }
+.rk-chips .chip:has(input:focus-visible) { outline: 2px solid var(--dourado); outline-offset: 1px; }
+
+.rk-analysis { display: grid; gap: 14px; align-items: center; }
+@media (min-width: 640px) { .rk-analysis { grid-template-columns: 240px minmax(0, 1fr); } }
+.rk-picker { display: grid; grid-template-columns: repeat(5, 1fr); gap: 3px; }
+.rk-pcell { aspect-ratio: 1.25; border: 0; border-radius: 5px; font: 600 0.75rem var(--body); font-variant-numeric: tabular-nums; color: var(--ink); cursor: pointer; }
+.rk-pcell.lv-low { background: color-mix(in srgb, var(--risk-low) 22%, var(--surface)); }
+.rk-pcell.lv-moderate { background: color-mix(in srgb, var(--risk-moderate) 26%, var(--surface)); }
+.rk-pcell.lv-high { background: color-mix(in srgb, var(--risk-high) 26%, var(--surface)); }
+.rk-pcell.lv-critical { background: color-mix(in srgb, var(--risk-critical) 26%, var(--surface)); }
+.rk-pcell:hover:not(:disabled) { box-shadow: inset 0 0 0 2px var(--ink-60); }
+.rk-pcell.on { box-shadow: inset 0 0 0 2px var(--ink); font-weight: 800; }
+.rk-pcell.on.lv-low { background: var(--risk-low); color: var(--risk-on-low); }
+.rk-pcell.on.lv-moderate { background: var(--risk-moderate); color: var(--risk-on-moderate); }
+.rk-pcell.on.lv-high { background: var(--risk-high); color: var(--risk-on-high); }
+.rk-pcell.on.lv-critical { background: var(--risk-critical); color: var(--risk-on-critical); }
+.rk-pcell:focus-visible { outline: 2px solid var(--dourado); outline-offset: 1px; }
+.rk-pcell:disabled { cursor: default; }
+.rk-analysis-side .field { margin-bottom: 10px; }
+.rk-score { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 0.875rem; }
+.rk-score strong { font: 700 1.5rem var(--display); }
+
+.rk-strats { display: grid; gap: 6px; grid-template-columns: repeat(auto-fill, minmax(min(100%, 200px), 1fr)); }
+.rk-strat { display: grid; gap: 2px; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--radius-sm); cursor: pointer; font-size: 0.8125rem; transition: border-color 120ms ease, background-color 120ms ease; }
+.rk-strat span { color: var(--ink-60); line-height: 1.35; }
+.rk-strat:hover { border-color: var(--verde); }
+.rk-strat.on { border-color: var(--verde); background: var(--verde-tint); box-shadow: inset 0 0 0 1px var(--verde); }
+.rk-strat:has(input:focus-visible) { outline: 2px solid var(--dourado); outline-offset: 1px; }
+.rk-fs:disabled .rk-strat, .rk-fs:disabled .chip, .rk-fs:disabled .rk-seg-opt { cursor: default; }
+.rk-clear { justify-self: start; margin-top: 4px; }
+.rk-monitor .field > span:not(.label) { font-size: 0.875rem; }
+.rk-reviewed { justify-self: start; margin-top: 4px; }
+.rk-actions { border-top: 1px solid var(--line); padding-top: 14px; }
+
+/* Matriz mais compacta na coluna lateral */
+.rk-side .rk-grid-row { grid-template-columns: 58px repeat(5, minmax(0, 1fr)); gap: 3px; }
+.rk-side .rk-grid { gap: 3px; }
+.rk-side .rk-cell { aspect-ratio: 2.1; min-height: 26px; font-size: 0.9375rem; }
+.rk-side .rk-legend { margin-top: 2px; }
+
+/* ---------- Tela cheia (computador): a aba cabe na janela, sem rolar a página ----------
+   Toolbar e indicadores fixos; o registro ocupa a altura que sobra e rola por dentro; a coluna
+   lateral rola sozinha se a janela for baixa. Mesmo critério das outras visões do projeto. */
+@media (min-width: 821px) and (min-height: 620px) {
+  @container projeto (min-width: 900px) {
+    .project-view.pv-riscos { overflow: hidden; }
+    .rk { height: 100%; grid-template-rows: auto auto minmax(0, 1fr); }
+    .rk-body { min-height: 0; align-items: stretch; grid-template-rows: minmax(0, 1fr); }
+    .rk-register { min-height: 0; }
+    .rk-register .pane-body { padding-right: 4px; }
+    .rk-side { min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 0 2px 2px 0; }
+  }
+}
+
+/* Cartão "Riscos do projeto" na visão geral (RisksCard): perfil em uma barra + 3 mais graves. */
+.rk-card > h2 { justify-content: space-between; }
+.rk-card-all { margin-left: auto; }
+.rk-card-profile { display: grid; gap: 8px; margin-bottom: 14px; }
+.rk-card-bar { display: flex; gap: 2px; height: 10px; border-radius: 5px; overflow: hidden; }
+.rk-card-bar > span { min-width: 6px; }
+.rk-card-bar .lv-low { background: var(--risk-low); }
+.rk-card-bar .lv-moderate { background: var(--risk-moderate); }
+.rk-card-bar .lv-high { background: var(--risk-high); }
+.rk-card-bar .lv-critical { background: var(--risk-critical); }
+.rk-card-legend { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 0; padding: 0; list-style: none; font-size: 0.8125rem; color: var(--ink-60); }
+.rk-card-legend li { display: inline-flex; align-items: center; gap: 5px; }
+.rk-card-legend strong { color: var(--ink); font-variant-numeric: tabular-nums; }
+.rk-card-list { list-style: none; margin: 0; padding: 0; }
+.rk-card-row { display: grid; grid-template-columns: 76px minmax(0, 1fr); align-items: center; gap: 10px; width: 100%; padding: 9px 4px; border: 0; border-top: 1px solid var(--line); background: none; color: inherit; font: inherit; font-size: 0.875rem; text-align: left; cursor: pointer; }
+.rk-card-row:hover { background: var(--paper-deep); }
+.rk-card-row:hover .rk-card-title { color: var(--azul); text-decoration: underline; }
+.rk-card-row:focus-visible { outline: 2px solid var(--dourado); outline-offset: -2px; }
+.rk-card-lv { display: inline-flex; align-items: center; gap: 6px; font-size: 0.75rem; font-weight: 600; color: var(--ink-60); }
+.rk-card-lv::before { content: ""; flex: none; width: 8px; height: 8px; border-radius: 50%; }
+.rk-card-lv.lv-low::before { background: var(--risk-low); }
+.rk-card-lv.lv-moderate::before { background: var(--risk-moderate); }
+.rk-card-lv.lv-high::before { background: var(--risk-high); }
+.rk-card-lv.lv-critical::before { background: var(--risk-critical); }
+.rk-card-title { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; font-weight: 600; line-height: 1.35; }
+.rk-card-more { margin-top: 4px; padding: 8px 4px; border: 0; border-top: 1px solid var(--line); background: none; width: 100%; text-align: left; font: inherit; font-size: 0.8125rem; color: var(--azul); cursor: pointer; }
+.rk-card-more:hover { text-decoration: underline; }
+.rk-card-more:focus-visible { outline: 2px solid var(--dourado); outline-offset: -2px; }

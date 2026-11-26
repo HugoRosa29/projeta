@@ -85,6 +85,69 @@ class ProjectPatch(BaseModel):
     progress: int | None = Field(default=None, ge=0, le=100)
 
 
+class BaselineIn(BaseModel):
+    # Limites finos ficam no serviço (mensagem em português); aqui só barra corpo absurdo.
+    name: str = Field(default="", max_length=500)
+    note: str = Field(default="", max_length=2000)
+
+
+RiskKind = Literal["threat", "opportunity"]
+RiskCategory = Literal["technical", "management", "commercial", "external"]
+RiskStatus = Literal["open", "responding", "occurred", "closed"]
+RiskStrategy = Literal[
+    "escalate", "avoid", "transfer", "mitigate", "exploit", "share", "enhance", "accept"
+]
+RiskObjective = Literal["schedule", "cost", "scope", "quality"]
+
+
+class RiskPatch(BaseModel):
+    # Limites finos (e a estratégia certa para o tipo) ficam no serviço, com mensagem em
+    # português; aqui só barra corpo absurdo. Ausente = não mexer; "" ou nulo = limpar.
+    kind: RiskKind | None = None
+    title: str | None = Field(default=None, max_length=1000)
+    cause: str | None = Field(default=None, max_length=5000)
+    effect: str | None = Field(default=None, max_length=5000)
+    category: RiskCategory | None = None
+    probability: int | None = Field(default=None, ge=1, le=5)
+    impact: int | None = Field(default=None, ge=1, le=5)
+    affects: list[RiskObjective] | None = Field(default=None, max_length=10)
+    strategy: RiskStrategy | Literal[""] | None = None
+    response: str | None = Field(default=None, max_length=10000)
+    contingency: str | None = Field(default=None, max_length=10000)
+    trigger_signal: str | None = Field(default=None, max_length=5000)
+    owner_id: str | None = None
+    response_due: str | None = Field(default=None, max_length=20)
+    status: RiskStatus | None = None
+    version: int | None = None
+    # Marca o risco como revisado agora, mesmo sem mudar a avaliação.
+    reviewed: bool = False
+
+
+class RiskIn(RiskPatch):
+    title: str = Field(max_length=1000)
+    probability: int = Field(ge=1, le=5)
+    impact: int = Field(ge=1, le=5)
+
+
+class FolderIn(BaseModel):
+    # Limite fino no serviço (mensagem em português); aqui só barra corpo absurdo.
+    name: str = Field(max_length=500)
+
+
+class PhaseIn(BaseModel):
+    # Limite fino no serviço (mensagem em português); aqui só barra corpo absurdo.
+    name: str = Field(max_length=500)
+
+
+class PhaseOrderIn(BaseModel):
+    ids: list[str] = Field(max_length=100)
+
+
+class ProjectFolderIn(BaseModel):
+    # Nulo tira o projeto da pasta.
+    folder_id: str | None = None
+
+
 class MemberIn(BaseModel):
     user_id: str
 
@@ -161,6 +224,10 @@ class PermissionsIn(BaseModel):
 
 class ShareIn(BaseModel):
     project_id: str = Field(max_length=64)
+
+
+class ObjectiveShareIn(BaseModel):
+    objective_id: str = Field(max_length=64)
 
 
 class DirectShareIn(BaseModel):

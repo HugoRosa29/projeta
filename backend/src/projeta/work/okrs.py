@@ -4,6 +4,9 @@ Quem cria e edita objetivos e KRs precisa de `okr.manage`. O check-in (novo valo
 nota) é do dono do KR, que não precisa de permissão extra: ser dono é a delegação. Quem tem
 `okr.manage` também pode registrar no lugar do dono. Qualquer membro do espaço lê.
 
+Objetivos compartilhados pelo organograma (work/org.py, `objective_shares`) aparecem à unidade que
+recebeu em `received`, só leitura, para o Gestor e perfis com `org.view_shared`.
+
 O progresso é calculado na leitura, nunca guardado no KR: mudar a meta recalcula tudo. O check-in
 guarda o progresso daquele momento, para o histórico não mudar quando a meta mudar.
 """
@@ -16,7 +19,13 @@ from zoneinfo import ZoneInfo
 
 from ..db import Ctx
 from ..errors import BadRequestError, ForbiddenError
-from ..identity.access import VISIBLE_PROJECT, is_uuid, membership, project_access
+from ..identity.access import (
+    OBJECTIVE_SHARED_TO_ME,
+    VISIBLE_PROJECT,
+    is_uuid,
+    membership,
+    project_access,
+)
 from ..identity.policy import Member, assert_can
 
 CONFIDENCE = ("on_track", "at_risk", "off_track")
@@ -159,50 +168,89 @@ def list_okrs(
         "WHERE o.workspace_id = %s AND o.period = %s ORDER BY o.position, o.created_at",
         (workspace_id, period),
     )
-    krs = [
-        _shape_kr(ctx, r, m, pace, now)
-        for r in ctx.all(
-            f"{_KR_SELECT} WHERE o.workspace_id = %(ws)s AND o.period = %(period)s "
-            "ORDER BY k.position, k.created_at",
-            {"ws": workspace_id, "period": period, "uid": ctx.user_id},
-        )
-    ]
-    by_obj: dict[str, list[dict]] = {}
-    for k in krs:
-        by_obj.setdefault(k["objective_id"], []).append(k)
-    for o in objectives:
-        items = by_obj.get(o["id"], [])
-        o["key_results"] = items
-        o["progress"] = round(sum(k["progress"] for k in items) / len(items)) if items else 0
-        o["confidence"] = _worst([k["confidence"] for k in items])
+    krs = _attach_krs(ctx, objectives, m, pace, now)
     periods = {
         r["period"]
         for r in ctx.all(
             "SELECT DISTINCT period FROM objectives WHERE workspace_id = %s", (workspace_id,)
         )
     } | {period, quarter_of(today)}
-    week_ago = now - timedelta(days=STALE_DAYS)
+    received: list[dict] = []
+    received_krs: list[dict] = []
+    if m.can("org.view_shared"):
+        # Recebidos pela unidade deste espaço; só leitura, nunca check-in por aqui.
+        params = {"ws": workspace_id, "uid": ctx.user_id}
+        rows = ctx.all(
+            f"""SELECT o.id, o.title, o.description, o.owner_id, u.name AS owner_name, o.period,
+                  ow.name AS shared_from
+                FROM objectives o JOIN workspaces ow ON ow.id = o.workspace_id
+                LEFT JOIN users u ON u.id = o.owner_id
+                WHERE o.id IN (SELECT s.objective_id FROM objective_shares s
+                               JOIN workspaces rw ON rw.org_unit = s.unit WHERE rw.id = %(ws)s)
+                  AND {OBJECTIVE_SHARED_TO_ME}
+                ORDER BY ow.name, o.position, o.created_at""",
+            params,
+        )
+        periods |= {r["period"] for r in rows}
+        received = [r for r in rows if r["period"] == period]
+        received_krs = _attach_krs(ctx, received, m, pace, now, read_only=True)
     return {
         "period": period,
         "periods": sorted(periods, reverse=True),
         "pace": pace,
         "can_manage": m.can("okr.manage"),
         "objectives": objectives,
-        "summary": {
-            "objectives": len(objectives),
-            "key_results": len(krs),
-            "progress": round(sum(o["progress"] for o in objectives) / len(objectives))
-            if objectives
-            else 0,
-            "confidence": {c: sum(1 for k in krs if k["confidence"] == c) for c in CONFIDENCE},
-            "stale": sum(1 for k in krs if k["stale"]),
-            "behind_pace": sum(1 for k in krs if k["behind_pace"]),
-            "updated_this_week": sum(
-                1 for k in krs if k["last_checkin_at"] and k["last_checkin_at"] >= week_ago
-            ),
-            "without_owner": sum(1 for k in krs if not k["owner_id"]),
-            "cost": sum(k["cost"] or 0 for k in krs),
-        },
+        "summary": _summary(objectives, krs, now),
+        "received": {"objectives": received, "summary": _summary(received, received_krs, now)},
+    }
+
+
+def _attach_krs(
+    ctx: Ctx,
+    objectives: list[dict],
+    m: Member,
+    pace: int | None,
+    now: datetime,
+    read_only: bool = False,
+) -> list[dict]:
+    """Preenche KRs, progresso e confiança de cada objetivo; devolve todos os KRs."""
+    krs = [
+        _shape_kr(ctx, r, m, pace, now)
+        for r in ctx.all(
+            f"{_KR_SELECT} WHERE k.objective_id = ANY(%(ids)s::uuid[]) "
+            "ORDER BY k.position, k.created_at",
+            {"ids": [o["id"] for o in objectives], "uid": ctx.user_id},
+        )
+    ]
+    by_obj: dict[str, list[dict]] = {}
+    for k in krs:
+        if read_only:
+            k["can_checkin"] = False
+        by_obj.setdefault(k["objective_id"], []).append(k)
+    for o in objectives:
+        items = by_obj.get(o["id"], [])
+        o["key_results"] = items
+        o["progress"] = round(sum(k["progress"] for k in items) / len(items)) if items else 0
+        o["confidence"] = _worst([k["confidence"] for k in items])
+    return krs
+
+
+def _summary(objectives: list[dict], krs: list[dict], now: datetime) -> dict:
+    week_ago = now - timedelta(days=STALE_DAYS)
+    return {
+        "objectives": len(objectives),
+        "key_results": len(krs),
+        "progress": round(sum(o["progress"] for o in objectives) / len(objectives))
+        if objectives
+        else 0,
+        "confidence": {c: sum(1 for k in krs if k["confidence"] == c) for c in CONFIDENCE},
+        "stale": sum(1 for k in krs if k["stale"]),
+        "behind_pace": sum(1 for k in krs if k["behind_pace"]),
+        "updated_this_week": sum(
+            1 for k in krs if k["last_checkin_at"] and k["last_checkin_at"] >= week_ago
+        ),
+        "without_owner": sum(1 for k in krs if not k["owner_id"]),
+        "cost": sum(k["cost"] or 0 for k in krs),
     }
 
 
@@ -269,7 +317,17 @@ def my_okrs(ctx: Ctx, workspace_id: str, timezone: str, now: datetime | None = N
 
 
 def list_checkins(ctx: Ctx, kr_id: str) -> list[dict]:
-    kr, _ = _kr_and_member(ctx, kr_id)
+    """Histórico do KR: membros do espaço dono ou quem recebeu o objetivo pelo organograma."""
+    if not is_uuid(kr_id):
+        raise ForbiddenError()
+    kr = ctx.one(
+        "SELECT k.id FROM key_results k JOIN objectives o ON o.id = k.objective_id "
+        "WHERE k.id = %(id)s AND (EXISTS (SELECT 1 FROM workspace_members wm "
+        f"WHERE wm.workspace_id = o.workspace_id AND wm.user_id = %(uid)s) OR {OBJECTIVE_SHARED_TO_ME})",
+        {"id": kr_id, "uid": ctx.user_id},
+    )
+    if not kr:
+        raise ForbiddenError()
     rows = ctx.all(
         "SELECT c.id, c.value, c.progress, c.confidence, c.note, c.created_at, c.author_id, "
         "u.name AS author_name FROM okr_checkins c LEFT JOIN users u ON u.id = c.author_id "
