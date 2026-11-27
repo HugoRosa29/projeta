@@ -152,7 +152,9 @@ def list_projects(ctx: Ctx, workspace_id: str, include_archived: bool = False) -
 def get_project(ctx: Ctx, project_id: str) -> dict:
     a = project_access(ctx, project_id)
     members = ctx.all(
-        "SELECT u.id, u.name, u.email, wm.role, pm.roles AS project_roles FROM project_members pm JOIN users u ON u.id = pm.user_id "
+        "SELECT u.id, u.name, u.email, wm.role, pm.roles AS project_roles, "
+        "(SELECT f.updated_at FROM user_photos f WHERE f.user_id = u.id) AS photo_version "
+        "FROM project_members pm JOIN users u ON u.id = pm.user_id "
         "JOIN workspace_members wm ON wm.user_id = u.id AND wm.workspace_id = %s "
         "WHERE pm.project_id = %s ORDER BY u.name",
         (a.project["workspace_id"], project_id),

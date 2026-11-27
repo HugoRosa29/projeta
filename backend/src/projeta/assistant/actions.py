@@ -16,6 +16,7 @@ foto, importação), exportar, entrar/sair da sessão e aceitar convite (exige o
 
 from __future__ import annotations
 
+import re
 import types
 import typing
 import unicodedata
@@ -28,9 +29,9 @@ import psycopg
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from ..db import Ctx
-from ..errors import AppError, BadRequestError, ForbiddenError
+from ..errors import AppError, BadRequestError, ConflictError, ForbiddenError
 from ..identity import photos, workspaces
-from ..identity.access import is_uuid, project_access
+from ..identity.access import VISIBLE_PROJECT, is_uuid, project_access, task_access
 from ..identity.policy import PERMISSIONS
 from ..work import (
     baselines,
@@ -47,7 +48,8 @@ from ..work import (
     sprints,
     tasks,
 )
-from ..work.today import today_in
+from ..work.schedule import linked_start
+from ..work.today import add_days, today_in
 
 MAX_STEPS = 20
 
@@ -64,8 +66,12 @@ def _date(v: str) -> str:
     return v
 
 
+# Referência a algo criado num passo anterior do mesmo plano: "@passo:N" vira o id na execução.
+STEP_REF = re.compile(r"^@passo:(\d{1,2})$")
+
+
 def _uuid(v: str) -> str:
-    if not is_uuid(v):
+    if not is_uuid(v) and not STEP_REF.match(v):
         raise ValueError("identificador inválido; use o nome (ex.: project, task, person)")
     return v
 
@@ -90,7 +96,7 @@ Permission = Literal[tuple(PERMISSIONS)]  # type: ignore[valid-type]
 TermField = Literal[tuple(dict.fromkeys(formal.TAP_FIELDS + formal.TEP_FIELDS))]  # type: ignore[valid-type]
 
 # Campos de controle: preenchidos pelo sistema, nunca mostrados nem editados na prévia.
-HIDDEN = {"expected_version", "version"}
+HIDDEN = {"expected_version", "version", "expected_versions"}
 
 # Rótulos dos valores fixos, para a prévia mostrar em português.
 OPTION_LABEL: dict[str, dict[str, str]] = {
@@ -264,7 +270,27 @@ def _attrs(items: list[Attr] | None) -> list[dict] | None:
     return None if items is None else [i.model_dump() for i in items]
 
 
+def ensure_new_project_name(ctx: Ctx, workspace_id: str, name: str) -> None:
+    """O assistente não cria projeto homônimo de outro que a pessoa vê no espaço.
+
+    Dois projetos com o mesmo nome deixam as próximas mensagens ("planeje as tarefas do
+    projeto X") sem como saber de qual se trata. Pela tela a pessoa ainda pode, se quiser.
+    """
+    rows = ctx.all(
+        f"SELECT p.name, p.status FROM projects p WHERE p.workspace_id = %(ws)s AND {VISIBLE_PROJECT}",
+        {"ws": workspace_id, "uid": ctx.user_id},
+    )
+    hit = next((r for r in rows if _norm(r["name"]) == _norm(name)), None)
+    if hit:
+        where = " (arquivado)" if hit["status"] == "archived" else ""
+        raise BadRequestError(
+            f"Já existe o projeto “{hit['name']}”{where} neste espaço. Use o projeto existente "
+            "(cite-o pelo nome) ou escolha outro nome."
+        )
+
+
 def _project_create(r: Run, m: ProjectCreate) -> dict:
+    ensure_new_project_name(r.ctx, r.workspace_id, m.name)
     p = projects.create_project(
         r.ctx,
         r.workspace_id,
@@ -276,7 +302,7 @@ def _project_create(r: Run, m: ProjectCreate) -> dict:
         m.external_ref,
         _attrs(m.attributes),
     )
-    return _done(f"Projeto “{p['name']}” criado", _phref(p["id"]))
+    return _done(f"Projeto “{p['name']}” criado", _phref(p["id"]), id=str(p["id"]))
 
 
 def _project_update(r: Run, m: ProjectUpdate) -> dict:
@@ -336,7 +362,9 @@ def _revoke_matricula(r: Run, m: ProjectMatricula) -> dict:
 
 def _project_folder(r: Run, m: ProjectFolder) -> dict:
     folders.set_project_folder(r.ctx, m.project_id, m.folder_id)
-    return _done("Projeto movido de pasta" if m.folder_id else "Projeto tirado da pasta", "/projetos")
+    return _done(
+        "Projeto movido de pasta" if m.folder_id else "Projeto tirado da pasta", "/projetos"
+    )
 
 
 def _remove_cover(r: Run, m: ProjectRef) -> dict:
@@ -391,7 +419,7 @@ class FolderRef(P):
 
 def _folder_create(r: Run, m: FolderCreate) -> dict:
     f = folders.create_folder(r.ctx, r.workspace_id, m.name)
-    return _done(f"Pasta “{f['name']}” criada", "/projetos")
+    return _done(f"Pasta “{f['name']}” criada", "/projetos", id=str(f["id"]))
 
 
 def _folder_rename(r: Run, m: FolderRename) -> dict:
@@ -432,7 +460,7 @@ def _phase_project(r: Run, phase_id: str) -> str:
 
 def _phase_create(r: Run, m: PhaseCreate) -> dict:
     f = phases.create_phase(r.ctx, m.project_id, m.name)
-    return _done(f"Fase “{f['name']}” criada", _phref(m.project_id))
+    return _done(f"Fase “{f['name']}” criada", _phref(m.project_id), id=str(f["id"]))
 
 
 def _phase_rename(r: Run, m: PhaseRename) -> dict:
@@ -479,8 +507,8 @@ class BaselineRef(P):
 
 
 def _baseline_create(r: Run, m: BaselineCreate) -> dict:
-    baselines.create_baseline(r.ctx, m.project_id, m.name, m.note)
-    return _done("Linha de base registrada", _phref(m.project_id, "cronograma"))
+    b = baselines.create_baseline(r.ctx, m.project_id, m.name, m.note)
+    return _done("Linha de base registrada", _phref(m.project_id, "cronograma"), id=str(b["id"]))
 
 
 def _baseline_delete(r: Run, m: BaselineRef) -> dict:
@@ -585,7 +613,7 @@ def _task_fields(m: BaseModel, exclude: set[str]) -> dict:
 def _task_create(r: Run, m: TaskCreate) -> dict:
     fields = {k: v for k, v in _task_fields(m, {"project_id"}).items() if v is not None}
     t = tasks.create_task(r.ctx, r.workspace_id, m.project_id, fields, via="assistant")
-    return _done(f"Tarefa “{t['title']}” criada", _thref(t))
+    return _done(f"Tarefa “{t['title']}” criada", _thref(t), id=str(t["id"]))
 
 
 def _task_update(r: Run, m: TaskUpdate) -> dict:
@@ -612,6 +640,144 @@ def _dep_remove(r: Run, m: Dependency) -> dict:
     tasks.remove_dependency(r.ctx, m.task_id, m.depends_on_id)
     t = tasks.get_task(r.ctx, m.task_id)["task"]
     return _done(f"Dependência removida de “{t['title']}”", _thref(t))
+
+
+# ------------------------------------------------------------------ tarefas em lote
+
+MAX_BULK = 200
+
+
+class TaskBulkUpdate(P):
+    """Mesma mudança em várias tarefas de um projeto: um passo só no plano.
+
+    A seleção (filtros `where_*` ou `task_ids`) é congelada na proposta, com as versões: o que
+    a pessoa viu na prévia é exatamente o que muda.
+    """
+
+    project_id: Id = Field(title="Projeto")
+    where_phase: str | None = Field(default=None, max_length=100, title="Filtro: fase")
+    where_status: Status | None = Field(default=None, title="Filtro: estado")
+    where_assignee_id: Id | None = Field(default=None, title="Filtro: responsável")
+    where_unassigned: bool = Field(default=False, title="Filtro: sem responsável")
+    where_sprint_id: Id | None = Field(default=None, title="Filtro: sprint")
+    where_no_sprint: bool = Field(default=False, title="Filtro: no backlog (sem sprint)")
+    where_due_from: Date | None = Field(default=None, title="Filtro: prazo a partir de")
+    where_due_to: Date | None = Field(default=None, title="Filtro: prazo até")
+    where_query: str | None = Field(default=None, max_length=120, title="Filtro: título contém")
+    where_include_done: bool = Field(default=False, title="Filtro: incluir concluídas")
+    task_ids: list[Id] | None = Field(default=None, max_length=MAX_BULK, title="Tarefas afetadas")
+    expected_versions: dict[str, int] | None = None
+    # mudanças
+    status: Status | None = Field(default=None, title="Novo estado")
+    priority: Priority | None = Field(default=None, title="Nova prioridade")
+    assignee_id: Id | None = Field(default=None, title="Novo responsável")
+    start_date: Date | None = Field(default=None, title="Novo início")
+    due_date: Date | None = Field(default=None, title="Novo prazo")
+    shift_days: int | None = Field(default=None, ge=-365, le=365, title="Mover datas (dias)")
+    estimate_hours: float | None = Field(default=None, ge=0, le=2000, title="Nova estimativa (h)")
+    progress: int | None = Field(default=None, ge=0, le=100, title="Novo progresso (%)")
+    phase: str | None = Field(default=None, max_length=100, title="Nova fase")
+    is_milestone: bool | None = Field(default=None, title="Marco")
+    labels: list[str] | None = Field(default=None, max_length=20, title="Etiquetas (substitui)")
+    sprint_id: Id | None = Field(default=None, title="Nova sprint")
+
+    @model_validator(mode="after")
+    def _check(self) -> TaskBulkUpdate:
+        changes = self.model_fields_set & set(BULK_CHANGES)
+        if not changes:
+            raise ValueError("diga o que mudar nas tarefas")
+        if self.shift_days is not None and changes & {"due_date", "start_date"}:
+            raise ValueError("use shift_days ou datas fixas, não os dois")
+        if self.shift_days == 0:
+            raise ValueError("shift_days precisa ser diferente de zero")
+        if self.where_unassigned and self.where_assignee_id:
+            raise ValueError("escolha um responsável ou 'sem responsável', não os dois")
+        if self.where_no_sprint and self.where_sprint_id:
+            raise ValueError("escolha uma sprint ou 'sem sprint', não os dois")
+        return self
+
+
+BULK_CHANGES = (
+    "status", "priority", "assignee_id", "start_date", "due_date", "shift_days",
+    "estimate_hours", "progress", "phase", "is_milestone", "labels", "sprint_id",
+)  # fmt: skip
+
+
+def select_tasks(ctx: Ctx, m: TaskBulkUpdate) -> list[dict]:
+    """Tarefas do projeto que casam com os filtros (id, título, versão), em ordem de prazo."""
+    project_access(ctx, m.project_id)  # 403 se a pessoa não vê o projeto
+    where = ["t.project_id = %(pid)s"]
+    params: dict[str, Any] = {"pid": m.project_id, "lim": MAX_BULK + 1}
+    if m.where_phase:
+        where.append("lower(btrim(t.phase)) = lower(btrim(%(phase)s))")
+        params["phase"] = m.where_phase
+    if m.where_status:
+        where.append("t.status = %(status)s")
+        params["status"] = m.where_status
+    elif not m.where_include_done:
+        where.append("t.status <> 'done'")
+    if m.where_assignee_id:
+        where.append("t.assignee_id = %(who)s")
+        params["who"] = m.where_assignee_id
+    if m.where_unassigned:
+        where.append("t.assignee_id IS NULL")
+    if m.where_sprint_id:
+        where.append("t.sprint_id = %(spr)s")
+        params["spr"] = m.where_sprint_id
+    if m.where_no_sprint:
+        where.append("t.sprint_id IS NULL")
+    if m.where_due_from:
+        where.append("t.due_date >= %(df)s::date")
+        params["df"] = m.where_due_from
+    if m.where_due_to:
+        where.append("t.due_date <= %(dt)s::date")
+        params["dt"] = m.where_due_to
+    if m.where_query:
+        where.append("t.title ILIKE %(q)s")
+        params["q"] = (
+            "%" + m.where_query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+        )
+    return ctx.all(
+        "SELECT t.id::text AS id, t.title, t.version, t.due_date::text AS due_date FROM tasks t "
+        f"WHERE {' AND '.join(where)} ORDER BY t.due_date NULLS LAST, t.title LIMIT %(lim)s",
+        params,
+    )
+
+
+def _task_bulk(r: Run, m: TaskBulkUpdate) -> dict:
+    ids = m.task_ids if m.task_ids is not None else [t["id"] for t in select_tasks(r.ctx, m)]
+    if not ids:
+        raise BadRequestError("Nenhuma tarefa corresponde aos filtros. Revise a seleção.")
+    if len(ids) > MAX_BULK:
+        raise BadRequestError(f"São mais de {MAX_BULK} tarefas. Refine os filtros ou divida.")
+    # Confere todas as versões antes de gravar qualquer uma: uma mudança aqui pode recalcular
+    # datas de dependentes e mexer na versão delas.
+    current = {}
+    for tid in ids:
+        t = task_access(r.ctx, tid, lock=True).task
+        if t["project_id"] != m.project_id:
+            raise ForbiddenError()
+        current[tid] = t
+        expected = (m.expected_versions or {}).get(tid)
+        if expected is not None and expected != t["version"]:
+            raise ConflictError(
+                f"A tarefa “{t['title']}” foi alterada depois da prévia. Peça a proposta de novo."
+            )
+    fields = m.model_dump(exclude_unset=True, include=set(BULK_CHANGES) - {"shift_days"})
+    _hours(fields, "estimate_hours", "estimate_minutes")
+    for tid in ids:
+        f = dict(fields)
+        if m.shift_days:
+            t = tasks.get_task(r.ctx, tid)["task"]  # relido: um passo anterior pode ter mudado
+            if t["due_date"]:
+                f["due_date"] = add_days(t["due_date"], m.shift_days)
+            # Início imposto por dependência acompanha sozinho o prazo da anterior.
+            if t["start_date"] and not linked_start(r.ctx, tid):
+                f["start_date"] = add_days(t["start_date"], m.shift_days)
+            if not f:
+                continue  # sem datas para mover e nada mais a mudar
+        tasks.update_task(r.ctx, tid, f, None, via="assistant")
+    return _done(f"{len(ids)} tarefa(s) atualizada(s)", _phref(m.project_id, "lista"))
 
 
 def _comment_task(r: Run, comment_id: str) -> dict:
@@ -648,8 +814,8 @@ class RiskFields(P):
     cause: str | None = Field(default=None, max_length=1000, title="Causa")
     effect: str | None = Field(default=None, max_length=1000, title="Efeito")
     category: RiskCategory | None = Field(default=None, title="Categoria")
-    probability: int | None = Field(default=None, ge=1, le=5, title="Probabilidade (1–5)")
-    impact: int | None = Field(default=None, ge=1, le=5, title="Impacto (1–5)")
+    probability: int | None = Field(default=None, ge=1, le=5, title="Probabilidade (1 a 5)")
+    impact: int | None = Field(default=None, ge=1, le=5, title="Impacto (1 a 5)")
     affects: list[RiskObjective] | None = Field(default=None, max_length=4, title="Afeta")
     strategy: RiskStrategy | None = Field(default=None, title="Estratégia")
     response: str | None = Field(default=None, max_length=2000, title="Plano de resposta")
@@ -663,8 +829,8 @@ class RiskFields(P):
 class RiskCreate(RiskFields):
     project_id: Id = Field(title="Projeto")
     title: str = Field(min_length=1, max_length=160, title="Evento de risco")
-    probability: int = Field(ge=1, le=5, title="Probabilidade (1–5)")
-    impact: int = Field(ge=1, le=5, title="Impacto (1–5)")
+    probability: int = Field(ge=1, le=5, title="Probabilidade (1 a 5)")
+    impact: int = Field(ge=1, le=5, title="Impacto (1 a 5)")
 
 
 class RiskUpdate(RiskFields):
@@ -680,12 +846,18 @@ class RiskRef(P):
 
 
 def _risk_create(r: Run, m: RiskCreate) -> dict:
-    x = risks.create_risk(r.ctx, m.project_id, m.model_dump(exclude_unset=True, exclude={"project_id"}))
-    return _done(f"Risco R{x['number']} registrado", _phref(m.project_id, "riscos"))
+    x = risks.create_risk(
+        r.ctx, m.project_id, m.model_dump(exclude_unset=True, exclude={"project_id"})
+    )
+    return _done(
+        f"Risco R{x['number']} registrado", _phref(m.project_id, "riscos"), id=str(x["id"])
+    )
 
 
 def _risk_update(r: Run, m: RiskUpdate) -> dict:
-    fields = m.model_dump(exclude_unset=True, exclude={"project_id", "risk_id", "reviewed"} | HIDDEN)
+    fields = m.model_dump(
+        exclude_unset=True, exclude={"project_id", "risk_id", "reviewed"} | HIDDEN
+    )
     x = risks.update_risk(r.ctx, m.project_id, m.risk_id, fields, m.version, m.reviewed)
     return _done(f"Risco R{x['number']} atualizado", _phref(m.project_id, "riscos"))
 
@@ -738,7 +910,7 @@ def _sprint_project(r: Run, sprint_id: str) -> str:
 
 def _sprint_create(r: Run, m: SprintCreate) -> dict:
     s = sprints.create_sprint(r.ctx, m.project_id, _sprint_fields(m, {"project_id"}, True), r.today)
-    return _done(f"Sprint “{s['name']}” criada", _phref(m.project_id, "sprints"))
+    return _done(f"Sprint “{s['name']}” criada", _phref(m.project_id, "sprints"), id=str(s["id"]))
 
 
 def _sprint_update(r: Run, m: SprintUpdate) -> dict:
@@ -827,18 +999,18 @@ class KrCheckIn(P):
 
 
 def _objective_create(r: Run, m: ObjectiveCreate) -> dict:
-    o = okrs.create_objective(
-        r.ctx, r.workspace_id, m.title, m.period, m.description, m.owner_id
-    )
+    o = okrs.create_objective(r.ctx, r.workspace_id, m.title, m.period, m.description, m.owner_id)
     for kr in m.key_results:
         okrs.create_key_result(r.ctx, o["id"], kr.model_dump(exclude_unset=True))
     n = len(m.key_results)
     extra = f" com {n} resultado(s)-chave" if n else ""
-    return _done(f"Objetivo “{m.title}” criado{extra}", "/metas")
+    return _done(f"Objetivo “{m.title}” criado{extra}", "/metas", id=str(o["id"]))
 
 
 def _objective_update(r: Run, m: ObjectiveUpdate) -> dict:
-    okrs.update_objective(r.ctx, m.objective_id, m.model_dump(exclude_unset=True, exclude={"objective_id"}))
+    okrs.update_objective(
+        r.ctx, m.objective_id, m.model_dump(exclude_unset=True, exclude={"objective_id"})
+    )
     return _done("Objetivo atualizado", "/metas")
 
 
@@ -848,12 +1020,16 @@ def _objective_delete(r: Run, m: ObjectiveRef) -> dict:
 
 
 def _kr_create(r: Run, m: KrCreate) -> dict:
-    okrs.create_key_result(r.ctx, m.objective_id, m.model_dump(exclude_unset=True, exclude={"objective_id"}))
-    return _done(f"Resultado-chave “{m.title}” criado", "/metas")
+    k = okrs.create_key_result(
+        r.ctx, m.objective_id, m.model_dump(exclude_unset=True, exclude={"objective_id"})
+    )
+    return _done(f"Resultado-chave “{m.title}” criado", "/metas", id=str(k["id"]))
 
 
 def _kr_update(r: Run, m: KrUpdate) -> dict:
-    okrs.update_key_result(r.ctx, m.key_result_id, m.model_dump(exclude_unset=True, exclude={"key_result_id"}))
+    okrs.update_key_result(
+        r.ctx, m.key_result_id, m.model_dump(exclude_unset=True, exclude={"key_result_id"})
+    )
     return _done("Resultado-chave atualizado", "/metas")
 
 
@@ -865,9 +1041,7 @@ def _kr_delete(r: Run, m: KrRef) -> dict:
 def _kr_check_in(r: Run, m: KrCheckIn) -> dict:
     out = okrs.check_in(r.ctx, m.key_result_id, m.value, m.confidence, m.note, r.timezone)
     kr = out["key_result"]
-    return _done(
-        f"Check-in registrado: {out['previous_progress']}% → {kr['progress']}%", "/metas"
-    )
+    return _done(f"Check-in registrado: {out['previous_progress']}% → {kr['progress']}%", "/metas")
 
 
 def _objective_share(r: Run, m: ObjectiveRef) -> dict:
@@ -967,7 +1141,10 @@ def _ws_invite(r: Run, m: WorkspaceInvite) -> dict:
     return _done(
         f"Convite criado para {m.email.strip().lower()}",
         "/configuracoes",
-        once={"label": f"Link de convite para {m.email.strip().lower()}", "href": f"/convite/{inv['token']}"},
+        once={
+            "label": f"Link de convite para {m.email.strip().lower()}",
+            "href": f"/convite/{inv['token']}",
+        },
     )
 
 
@@ -980,7 +1157,9 @@ def _ws_permissions(r: Run, m: PermissionsChange) -> dict:
     current = workspaces.get_permissions(r.ctx, r.workspace_id)["permissions"]
     role_perms = (set(current.get(m.role, [])) | set(m.grant)) - set(m.revoke)
     workspaces.set_permissions(r.ctx, r.workspace_id, {**current, m.role: sorted(role_perms)})
-    return _done(f"Permissões do perfil {OPTION_LABEL['role'][m.role]} atualizadas", "/configuracoes")
+    return _done(
+        f"Permissões do perfil {OPTION_LABEL['role'][m.role]} atualizadas", "/configuracoes"
+    )
 
 
 def _my_timezone(r: Run, m: TimezoneChange) -> dict:
@@ -1050,6 +1229,9 @@ ACTIONS: list[Action] = [
            hint="sem project = tarefa pessoal; sprint/parent pelo nome"),
     Action("task.update", "Editar tarefa", TaskUpdate, _task_update,
            hint="null limpa o campo (ex.: due_date null, assignee 'ninguém', sprint null = backlog)"),
+    Action("task.bulk_update", "Editar várias tarefas de uma vez", TaskBulkUpdate, _task_bulk,
+           hint="selecione por where_* (where_assignee 'ninguém' = sem responsável; where_sprint pelo nome) "
+           "ou task_ids; shift_days adia (+) ou antecipa (-) prazos e inícios; até 200 tarefas num passo"),
     Action("task.delete", "Excluir tarefa", TaskRef, _task_delete, danger=True),
     Action("task.add_dependency", "Criar dependência entre tarefas", Dependency, _dep_add),
     Action("task.remove_dependency", "Remover dependência", Dependency, _dep_remove),
@@ -1096,6 +1278,19 @@ ACTIONS: list[Action] = [
     Action("profile.remove_photo", "Remover sua foto", NoParams, _my_photo_delete, danger=True),
 ]  # fmt: skip
 BY_NAME = {a.name: a for a in ACTIONS}
+
+# O que cada ação de criação produz, para passos seguintes do mesmo plano citarem pelo nome.
+CREATES: dict[str, tuple[tuple[str, ...], str]] = {
+    "project.create": (("project_id",), "name"),
+    "folder.create": (("folder_id",), "name"),
+    "phase.create": (("phase_id",), "name"),
+    "baseline.create": (("baseline_id",), "name"),
+    "task.create": (("task_id", "parent_id", "depends_on_id"), "title"),
+    "risk.create": (("risk_id",), "title"),
+    "sprint.create": (("sprint_id",), "name"),
+    "objective.create": (("objective_id",), "title"),
+    "key_result.create": (("key_result_id",), "title"),
+}
 NAMES = tuple(BY_NAME)
 
 
@@ -1143,8 +1338,9 @@ _SCOPE_SQL = {
     "folder_id": "SELECT workspace_id::text AS ws FROM project_folders WHERE id=%s",
     "comment_id": "SELECT t.workspace_id::text AS ws FROM task_comments c JOIN tasks t ON t.id=c.task_id WHERE c.id=%s",
     "invitation_id": "SELECT workspace_id::text AS ws FROM invitations WHERE id=%s",
+    "where_sprint_id": "SELECT p.workspace_id::text AS ws FROM sprints s JOIN projects p ON p.id=s.project_id WHERE s.id=%s",
 }  # fmt: skip
-_PERSON_FIELDS = ("user_id", "owner_id", "assignee_id")
+_PERSON_FIELDS = ("user_id", "owner_id", "assignee_id", "where_assignee_id")
 
 
 def _ids(params: dict) -> list[tuple[str, str]]:
@@ -1157,6 +1353,8 @@ def _ids(params: dict) -> list[tuple[str, str]]:
             for x in v:
                 if isinstance(x, dict):
                     out += _ids(x)
+                elif k == "task_ids" and isinstance(x, str):
+                    out.append(("task_id", x))
     return out
 
 
@@ -1181,12 +1379,13 @@ def _check_scope(ctx: Ctx, workspace_id: str, params: dict) -> None:
 def execute(ctx: Ctx, workspace_id: str, timezone: str, steps: list[dict]) -> list[dict]:
     """Executa os passos em ordem, na transação de quem chamou: falhou um, não grava nenhum."""
     r = Run(ctx, workspace_id, timezone)
-    out = []
+    out: list[dict] = []
     for i, st in enumerate(steps, 1):
         action = BY_NAME[st["action"]]
-        model = action.params.model_validate(st["params"])
         try:
-            _check_scope(ctx, workspace_id, st["params"])
+            params = _bind(st["params"], out, i)
+            model = action.params.model_validate(params)
+            _check_scope(ctx, workspace_id, params)
             out.append(action.run(r, model))
         except AppError as e:
             if len(steps) > 1:
@@ -1195,6 +1394,22 @@ def execute(ctx: Ctx, workspace_id: str, timezone: str, steps: list[dict]) -> li
                 e.args = (e.message,)
             raise
     return out
+
+
+def _bind(v: Any, done: list[dict], step: int) -> Any:
+    """Troca "@passo:N" pelo id que o passo N (já executado) criou."""
+    if isinstance(v, dict):
+        return {k: _bind(x, done, step) for k, x in v.items()}
+    if isinstance(v, list):
+        return [_bind(x, done, step) for x in v]
+    if isinstance(v, str) and (m := STEP_REF.match(v)):
+        n = int(m.group(1))
+        if not 1 <= n < step or "id" not in done[n - 1]:
+            raise BadRequestError(
+                f"A referência {v} não aponta para algo criado num passo anterior."
+            )
+        return done[n - 1]["id"]
+    return v
 
 
 def dry_run(ctx: Ctx, workspace_id: str, timezone: str, steps: list[dict]) -> None:
@@ -1235,11 +1450,15 @@ _NAME_SQL = {
     "user_id": "SELECT name AS n FROM users WHERE id=%s",
     "owner_id": "SELECT name AS n FROM users WHERE id=%s",
     "assignee_id": "SELECT name AS n FROM users WHERE id=%s",
+    "where_assignee_id": "SELECT name AS n FROM users WHERE id=%s",
+    "where_sprint_id": "SELECT name AS n FROM sprints WHERE id=%s",
 }  # fmt: skip
 
 
 def _name(ctx: Ctx, workspace_id: str, key: str, value: str) -> str:
     """Nome legível de um ID — só depois de conferir que ele é do espaço da proposta."""
+    if m := STEP_REF.match(value):
+        return f"(criado no passo {m.group(1)})"
     try:
         _check_scope(ctx, workspace_id, {key: value})
     except AppError:
@@ -1310,7 +1529,9 @@ def _display(ctx: Ctx, ws: str, key: str, value: Any) -> str:
         return "sim" if value else "não"
     if isinstance(value, list):
         return ", ".join(
-            labels.get(str(x), str(x)) if not isinstance(x, dict) else str(x.get("title") or x.get("name") or x)
+            labels.get(str(x), str(x))
+            if not isinstance(x, dict)
+            else str(x.get("title") or x.get("name") or x)
             for x in value
         )
     if isinstance(value, str) and key.endswith(("date", "_due")) and len(value) == 10:
@@ -1326,7 +1547,7 @@ def preview(ctx: Ctx, workspace_id: str, steps: list[dict]) -> dict:
         action = BY_NAME[st["action"]]
         fields = []
         for key, value in st["params"].items():
-            if key in HIDDEN:
+            if key in HIDDEN or key == "task_ids":
                 continue
             f = action.params.model_fields.get(key)
             if f is None:
@@ -1355,9 +1576,24 @@ def preview(ctx: Ctx, workspace_id: str, steps: list[dict]) -> dict:
                 labels = OPTION_LABEL.get(key, {})
                 item["options"] = [{"value": o, "label": labels.get(o, o)} for o in options]
             fields.append(item)
-        out.append(
-            {"action": action.name, "label": action.label, "danger": action.danger, "fields": fields}
-        )
+        item = {
+            "action": action.name,
+            "label": action.label,
+            "danger": action.danger,
+            "fields": fields,
+        }
+        ids = st["params"].get("task_ids")
+        if isinstance(ids, list):  # lote: a prévia lista as tarefas que vão mudar
+            rows = ctx.all(
+                "SELECT id::text AS id, title, due_date::text AS due FROM tasks "
+                "WHERE id = ANY(%s::uuid[]) AND workspace_id = %s",
+                ([i for i in ids if is_uuid(i)], workspace_id),
+            )
+            by_id = {r["id"]: r for r in rows}
+            item["targets"] = [
+                {"title": by_id[i]["title"], "due": by_id[i]["due"]} for i in ids if i in by_id
+            ]
+        out.append(item)
     return {"steps": out, "danger": any(s["danger"] for s in out)}
 
 
@@ -1374,6 +1610,8 @@ def known_project(ctx: Ctx, project_id: str) -> dict:
 
 # Campo de ID -> chave por nome que o modelo pode usar no lugar dele.
 REF_OF = {
+    "where_assignee_id": "where_assignee",
+    "where_sprint_id": "where_sprint",
     "project_id": "project",
     "task_id": "task",
     "parent_id": "parent",

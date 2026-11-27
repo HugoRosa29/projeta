@@ -105,6 +105,19 @@ def get_my_photo(user: dict = Depends(current_user)) -> Response:
     )
 
 
+@router.get("/users/{user_id}/photo")
+def get_user_photo(user_id: str, user: dict = Depends(current_user)) -> Response:
+    with uow(user["id"]) as ctx:
+        p = photos.get_user_photo(ctx, user_id)
+    if not p:
+        return Response(status_code=404)
+    return Response(
+        content=bytes(p["data"]),
+        media_type=p["content_type"],
+        headers={"Cache-Control": "private, max-age=3600", "X-Content-Type-Options": "nosniff"},
+    )
+
+
 @router.delete("/me/photo", status_code=204)
 def delete_my_photo(user: dict = Depends(current_user)) -> None:
     with uow(user["id"]) as ctx:

@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowUp, Check, CheckCircle2, Copy, CalendarPlus, MessageSquareText, ExternalLink, ListChecks, CalendarClock, OctagonAlert, FileText, LayoutGrid, Maximize2, Minimize2, Sparkles, Trash2, Users, X } from "lucide-react";
+import { ArrowUp, Check, CheckCircle2, FolderPlus, Loader2, Copy, CalendarPlus, MessageSquareText, ExternalLink, ListChecks, CalendarClock, OctagonAlert, FileText, LayoutGrid, Maximize2, Minimize2, Sparkles, Trash2, Users, X } from "lucide-react";
 import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import { Link } from "react-router";
 import { useProjectContext } from "../../app/projectContext";
@@ -26,6 +26,7 @@ const PROJECT_SUGGESTIONS = [
 
 // Modelos de atualização: preenchem o campo (não enviam), para a pessoa completar com a tarefa.
 const UPDATE_TEMPLATES = [
+  { label: "Começar um projeto", text: "Quero começar um projeto para ", icon: FolderPlus },
   { label: "Concluir uma tarefa", text: "Conclua a tarefa ", icon: CheckCircle2 },
   { label: "Registrar andamento", text: "Comente na tarefa ", icon: MessageSquareText },
   { label: "Mudar um prazo", text: "Mude o prazo da tarefa ", icon: CalendarPlus },
@@ -41,7 +42,8 @@ export function AssistantPanel({ onClose, expanded, onToggleExpand, draft }: { o
   const [lastFailed, setLastFailed] = useState<string | null>(null);
   // Resposta chegando: texto parcial e a ferramenta em uso (antes do primeiro trecho).
   const [streamText, setStreamText] = useState("");
-  const [toolLabel, setToolLabel] = useState<string | null>(null);
+  // Consultas que o assistente fez nesta resposta, na ordem: a última está em andamento.
+  const [tools, setTools] = useState<string[]>([]);
   const bodyRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const key = ["assistant", workspace.id];
@@ -54,15 +56,15 @@ export function AssistantPanel({ onClose, expanded, onToggleExpand, draft }: { o
       api.stream<StreamEvent>("/assistant/chat/stream", { workspace_id: workspace.id, project_id: project?.id ?? null, message }, (ev) => {
         if (ev.type === "delta") setStreamText((t) => t + ev.text);
         else if (ev.type === "reset") setStreamText("");
-        else if (ev.type === "tool") setToolLabel(ev.label);
+        else if (ev.type === "tool") setTools((xs) => (xs.at(-1) === ev.label ? xs : [...xs, ev.label]));
       }),
-    onMutate: (m) => (setPendingText(m), setLastFailed(null), setStreamText(""), setToolLabel(null)),
+    onMutate: (m) => (setPendingText(m), setLastFailed(null), setStreamText(""), setTools([])),
     onError: (_e, m) => setLastFailed(m),
     onSettled: async () => {
       await qc.invalidateQueries({ queryKey: key });
       setPendingText(null);
       setStreamText("");
-      setToolLabel(null);
+      setTools([]);
     },
   });
   const resolve = useMutation({
@@ -102,7 +104,7 @@ export function AssistantPanel({ onClose, expanded, onToggleExpand, draft }: { o
 
   useEffect(() => {
     bodyRef.current?.scrollTo({ top: bodyRef.current.scrollHeight });
-  }, [messages.length, pendingText, send.isError, streamText, toolLabel]);
+  }, [messages.length, pendingText, send.isError, streamText, tools.length]);
 
   const submit = (e: FormEvent, override?: string) => {
     e.preventDefault();
@@ -111,6 +113,9 @@ export function AssistantPanel({ onClose, expanded, onToggleExpand, draft }: { o
     setText("");
     if (inputRef.current) inputRef.current.style.height = "";
     send.mutate(m);
+  };
+  const say = (m: string) => {
+    if (!send.isPending) send.mutate(m);
   };
   const grow = (el: HTMLTextAreaElement) => {
     el.style.height = "auto";
@@ -167,7 +172,7 @@ export function AssistantPanel({ onClose, expanded, onToggleExpand, draft }: { o
             </div>
           )}
           {messages.map((m) => (
-            <MessageView key={m.id} m={m} onChoose={(task_id) => m.pending_action && resolve.mutate({ pending_action: m.pending_action, task_id })} />
+            <MessageView key={m.id} m={m} onSend={say} onChoose={(task_id) => m.pending_action && resolve.mutate({ pending_action: m.pending_action, task_id })} />
           ))}
           {pendingText && (
             <>
@@ -175,14 +180,19 @@ export function AssistantPanel({ onClose, expanded, onToggleExpand, draft }: { o
               <div className="as-row assistant" role="status" aria-label="O assistente está respondendo" aria-busy="true">
                 <span className="as-avatar" aria-hidden><Sparkles size={16} /></span>
                 <div className="as-content">
-                  {streamText ? (
-                    <Markdown text={streamText} />
-                  ) : (
-                    <>
-                      <span className="as-dots" aria-hidden><i /><i /><i /></span>
-                      {toolLabel && <span className="as-working">{toolLabel}…</span>}
-                    </>
+                  {tools.length > 0 && (
+                    <ul className="as-steps" aria-label="O que o assistente está fazendo">
+                      {tools.map((t, i) => {
+                        const doing = i === tools.length - 1 && !streamText;
+                        return (
+                          <li key={t + i} className={doing ? "doing" : "done"}>
+                            {doing ? <Loader2 size={14} aria-hidden className="spin" /> : <Check size={14} aria-hidden />} {t}{doing ? "…" : ""}
+                          </li>
+                        );
+                      })}
+                    </ul>
                   )}
+                  {streamText ? <Markdown text={streamText} /> : tools.length === 0 && <span className="as-dots" aria-hidden><i /><i /><i /></span>}
                 </div>
               </div>
             </>
@@ -235,7 +245,7 @@ function CopyButton({ text }: { text: string }) {
   );
 }
 
-function MessageView({ m, onChoose }: { m: ChatMessage; onChoose: (taskId: string) => void }) {
+function MessageView({ m, onChoose, onSend }: { m: ChatMessage; onChoose: (taskId: string) => void; onSend: (text: string) => void }) {
   if (m.role === "user") {
     return (
       <div className="as-row user">
@@ -271,7 +281,7 @@ function MessageView({ m, onChoose }: { m: ChatMessage; onChoose: (taskId: strin
             </ul>
           </div>
         )}
-        {m.proposal && <ProposalCard proposal={m.proposal} />}
+        {m.proposal && <ProposalCard proposal={m.proposal} onSend={onSend} />}
         <div className="as-actions"><CopyButton text={m.content} /></div>
       </div>
     </div>

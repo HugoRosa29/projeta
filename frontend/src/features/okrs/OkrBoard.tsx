@@ -1,4 +1,4 @@
-import { BarChart3, ChevronDown, Clock, FolderKanban, History, Pencil, Plus, Search, Table2, Trash2, X } from "lucide-react";
+import { BarChart3, ChevronDown, Clock, FolderKanban, History, Pencil, Plus, Search, SlidersHorizontal, Table2, Trash2, X } from "lucide-react";
 import { useMemo, useState, type ReactNode } from "react";
 import { Link } from "react-router";
 import { PALETTE } from "../../domain/board";
@@ -31,7 +31,6 @@ import { HistoryDialog, Initials, ProgressBar } from "./OkrParts";
 
 const fmt = (n: number) => n.toLocaleString("pt-BR");
 const plural = (n: number, one: string, many: string) => `${fmt(n)} ${n === 1 ? one : many}`;
-const pct = (part: number, whole: number) => (whole ? Math.round((100 * part) / whole) : 0);
 
 export interface BoardActions {
   onNewObjective: () => void;
@@ -54,14 +53,19 @@ export function OkrBoard({
   onCheckin,
   manage,
   share,
+  compact = false,
 }: {
   d: Board;
   onCheckin: (kr: KeyResult, siblings: KeyResult[]) => void;
   manage?: BoardActions;
   /** Botão de compartilhar de cada objetivo (só na página de Metas, que conhece o espaço). */
   share?: (o: Objective) => ReactNode;
+  /** Só os grupos, sem números do topo nem ferramentas: um segundo quadro na mesma página
+   *  (os recebidos) repetiria tudo isso logo abaixo do primeiro. */
+  compact?: boolean;
 }) {
   const [filter, setFilter] = useState<KrFilter>(NO_KR_FILTER);
+  const [showFilters, setShowFilters] = useState(false);
   const [sort, setSort] = useState<KrSort>("position");
   const [view, setView] = useState<View>("table");
   const [closed, setClosed] = useState<ReadonlySet<string>>(new Set());
@@ -79,22 +83,17 @@ export function OkrBoard({
       return next;
     });
   const krCount = shown.reduce((n, o) => n + o.key_results.length, 0);
+  // Coluna de custo só quando algum KR tem custo: vazia, é uma coluna inteira de "—".
+  const hasCost = d.objectives.some((o) => o.key_results.some((k) => k.cost));
+  // Filtros recolhidos que estão valendo: o botão mostra quantos, para não sumirem da vista.
+  const hidden = [filter.owner, filter.confidence].filter(Boolean).length;
 
   return (
     <section className="pn okr-board" aria-labelledby="okr-board-title">
       <h2 id="okr-board-title" className="sr-only">Objetivos e resultados-chave</h2>
 
+      {!compact && (
       <ul className="okr-stats" aria-label="Resumo do trimestre">
-        <StatBar label="Objetivos" value={fmt(st.objectives)} note={`${fmt(st.onPace)} no ritmo`} fill={pct(st.onPace, st.objectives)} tone="ok" />
-        <StatBar
-          label="Resultados-chave"
-          value={fmt(st.keyResults)}
-          note={`${fmt(st.atRisk)} em risco`}
-          fill={pct(st.atRisk, st.keyResults)}
-          tone={st.atRisk ? "warn" : "ok"}
-          pressed={filter.confidence === "at_risk"}
-          onClick={st.atRisk ? () => set({ confidence: filter.confidence === "at_risk" ? "" : "at_risk" }) : undefined}
-        />
         <li className="okr-stat">
           <div>
             <span className="okr-stat-l">Progresso geral</span>
@@ -105,16 +104,23 @@ export function OkrBoard({
           </div>
         </li>
         <StatBar
-          label="Check-ins em dia"
-          value={`${fmt(st.updated)} de ${fmt(st.keyResults)}`}
-          note={st.pending ? `${fmt(st.pending)} pedem atualização` : "todos em dia"}
-          fill={pct(st.updated, st.keyResults)}
-          tone={st.pending ? "info" : "ok"}
+          label="KRs em risco"
+          value={fmt(st.atRisk)}
+          note={`de ${fmt(st.keyResults)}`}
+          pressed={filter.confidence === "at_risk"}
+          onClick={st.atRisk ? () => set({ confidence: filter.confidence === "at_risk" ? "" : "at_risk" }) : undefined}
+        />
+        <StatBar
+          label="Check-ins pendentes"
+          value={fmt(st.pending)}
+          note={st.pending ? `de ${fmt(st.keyResults)}` : "todos em dia"}
           pressed={filter.pending}
           onClick={st.pending ? () => set({ pending: !filter.pending }) : undefined}
         />
       </ul>
+      )}
 
+      {!compact && (
       <div className="okr-tools">
         <div className="okr-tools-l" role="search" aria-label="Filtrar os OKRs">
           {manage && (
@@ -127,6 +133,21 @@ export function OkrBoard({
             <span className="sr-only">Buscar</span>
             <input className="input" type="search" placeholder="Buscar KR, pessoa…" title="Busca no objetivo, no KR, no responsável e no projeto" value={filter.q} onChange={(e) => set({ q: e.target.value })} />
           </label>
+          <button type="button" className="btn btn-ghost btn-sm" aria-expanded={showFilters} onClick={() => setShowFilters((v) => !v)}>
+            <SlidersHorizontal size={16} aria-hidden /> Filtros{hidden > 0 && <span className="badge info">{hidden}</span>}
+          </button>
+          {filtered && (
+            <button type="button" className="btn btn-ghost btn-sm" onClick={() => setFilter(NO_KR_FILTER)}>
+              <X size={16} aria-hidden /> Limpar
+            </button>
+          )}
+        </div>
+        <div className="okr-views" role="group" aria-label="Forma de ver">
+          <button type="button" aria-pressed={view === "table"} onClick={() => setView("table")}><Table2 size={16} aria-hidden /> Tabela</button>
+          <button type="button" aria-pressed={view === "chart"} onClick={() => setView("chart")}><BarChart3 size={16} aria-hidden /> Gráfico</button>
+        </div>
+        {showFilters && (
+        <div className="okr-filters" role="group" aria-label="Mais filtros">
           <select className="select pn-select" aria-label="Filtrar por responsável" value={filter.owner} onChange={(e) => set({ owner: e.target.value })}>
             <option value="">Todos os responsáveis</option>
             {owners.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
@@ -142,17 +163,10 @@ export function OkrBoard({
               {(Object.keys(KR_SORT_LABEL) as KrSort[]).map((k) => <option key={k} value={k}>{KR_SORT_LABEL[k]}</option>)}
             </select>
           </label>
-          {filtered && (
-            <button type="button" className="btn btn-ghost btn-sm" onClick={() => setFilter(NO_KR_FILTER)}>
-              <X size={16} aria-hidden /> Limpar
-            </button>
-          )}
         </div>
-        <div className="okr-views" role="group" aria-label="Forma de ver">
-          <button type="button" aria-pressed={view === "table"} onClick={() => setView("table")}><Table2 size={16} aria-hidden /> Tabela</button>
-          <button type="button" aria-pressed={view === "chart"} onClick={() => setView("chart")}><BarChart3 size={16} aria-hidden /> Gráfico</button>
-        </div>
+        )}
       </div>
+      )}
 
       {filtered && (
         <p className="muted okr-hint okr-count" aria-live="polite">
@@ -175,6 +189,7 @@ export function OkrBoard({
               onCheckin={(kr) => onCheckin(kr, o.key_results.map((x) => ({ ...x, objective_title: o.title })))}
               manage={manage}
               share={share}
+              hasCost={hasCost}
             />
           ))}
         </div>
@@ -189,16 +204,12 @@ function StatBar({
   label,
   value,
   note,
-  fill,
-  tone,
   pressed,
   onClick,
 }: {
   label: string;
   value: string;
   note: string;
-  fill: number;
-  tone: "ok" | "warn" | "info";
   pressed?: boolean;
   onClick?: () => void;
 }) {
@@ -206,10 +217,7 @@ function StatBar({
     <>
       <span className="okr-stat-l">{label}</span>
       <span className="okr-stat-v">
-        {value} <small>· {note}</small>
-      </span>
-      <span className={`okr-stat-bar t-${tone}`} aria-hidden>
-        <span style={{ width: `${fill}%` }} />
+        {value} <small>{note}</small>
       </span>
     </>
   );
@@ -238,6 +246,7 @@ function ObjectiveGroup({
   onCheckin,
   manage,
   share,
+  hasCost,
 }: {
   o: Objective;
   color: string;
@@ -247,6 +256,7 @@ function ObjectiveGroup({
   onCheckin: (kr: KeyResult) => void;
   manage?: BoardActions;
   share?: (o: Objective) => ReactNode;
+  hasCost: boolean;
 }) {
   const sum = objectiveSummary(o);
   const n = o.key_results.length;
@@ -264,6 +274,8 @@ function ObjectiveGroup({
           <span>{o.owner_name ?? "sem responsável"}</span>
           <span>{plural(n, "KR", "KRs")}</span>
           <strong>{o.progress}%</strong>
+          {hasCost && sum.cost != null && sum.cost > 0 && <span title={fmtCostFull(sum.cost)}>{fmtCost(sum.cost)}</span>}
+          {sum.pending > 0 && <span className="badge info">{plural(sum.pending, "check-in pendente", "check-ins pendentes")}</span>}
           {behind && <span className="badge warn">ritmo abaixo do previsto</span>}
         </span>
         {(manage || share) && (
@@ -291,59 +303,31 @@ function ObjectiveGroup({
               <th scope="col" className="pn-c-prog">Progresso</th>
               <th scope="col" className="okr-c-upd">Último check-in</th>
               <th scope="col" className="pn-c-health">Avaliação</th>
-              <th scope="col" className="okr-c-cost">Custo</th>
+              {hasCost && <th scope="col" className="okr-c-cost">Custo</th>}
               <th scope="col" className="okr-c-act"><span className="sr-only">Ações</span></th>
             </tr>
           </thead>
           <tbody>
             {o.key_results.map((k) => (
-              <KrLine key={k.id} kr={k} pace={pace} onCheckin={onCheckin} onEdit={manage && (() => manage.onEditKr(o, k))} onDelete={manage && (() => manage.onDeleteKr(k))} />
+              <KrLine key={k.id} kr={k} pace={pace} hasCost={hasCost} onCheckin={onCheckin} onEdit={manage && (() => manage.onEditKr(o, k))} onDelete={manage && (() => manage.onDeleteKr(k))} />
             ))}
             {!n && (
               <tr>
-                <td colSpan={7} className="okr-empty-row muted">
+                <td colSpan={hasCost ? 7 : 6} className="okr-empty-row muted">
                   Sem resultados-chave ainda. Um objetivo vira mensurável com 2 a 5 resultados-chave.
                 </td>
               </tr>
             )}
-          </tbody>
-          <tfoot>
-            <tr>
-              <td className="okr-foot-name">
-                {manage && (
+            {manage && (
+              <tr className="okr-add-row">
+                <td colSpan={hasCost ? 7 : 6}>
                   <button type="button" className="okr-add" onClick={() => manage.onAddKr(o)}>
                     <Plus size={15} aria-hidden /> Adicionar KR
                   </button>
-                )}
-                {sum.projects > 0 && <small className="okr-foot-note">{plural(sum.projects, "projeto vinculado", "projetos vinculados")}</small>}
-              </td>
-              <td className="okr-c-who">
-                {fmt(sum.owners)}
-                <small> resp.</small>
-              </td>
-              <td className="pn-c-prog">
-                <Battery pct={o.progress} pace={pace} name="Média do objetivo" />
-              </td>
-              <td className={`okr-c-upd${sum.pending ? " okr-stale" : ""}`}>
-                {sum.pending ? `${fmt(sum.pending)} ${sum.pending === 1 ? "pendente" : "pendentes"}` : "em dia"}
-              </td>
-              <td className="pn-c-health">
-                {n > 0 && (
-                  <span className="pn-mix" role="img" aria-label={`Avaliação: ${CONFIDENCES.map((c) => `${CONFIDENCE_LABEL[c]} ${sum.confidence[c]}`).join(", ")}, sem avaliação ${sum.unrated}`}>
-                    {CONFIDENCES.filter((c) => sum.confidence[c]).map((c) => (
-                      <span key={c} className={`g-${CONFIDENCE_COLOR[c]}`} style={{ flexGrow: sum.confidence[c] }} />
-                    ))}
-                    {sum.unrated > 0 && <span className="okr-mix-none" style={{ flexGrow: sum.unrated }} />}
-                  </span>
-                )}
-              </td>
-              <td className="okr-c-cost" title={sum.cost != null ? `${fmtCostFull(sum.cost)}${sum.costMissing ? ` · ${sum.costMissing} sem custo informado` : ""}` : undefined}>
-                <strong>{sum.cost != null && sum.cost > 0 ? fmtCost(sum.cost) : "—"}</strong>
-                {sum.cost != null && sum.cost > 0 && <small> total</small>}
-              </td>
-              <td className="okr-c-act" />
-            </tr>
-          </tfoot>
+                </td>
+              </tr>
+            )}
+          </tbody>
         </table>
       )}
     </section>
@@ -353,12 +337,14 @@ function ObjectiveGroup({
 function KrLine({
   kr,
   pace,
+  hasCost,
   onCheckin,
   onEdit,
   onDelete,
 }: {
   kr: KeyResult;
   pace: number | null;
+  hasCost: boolean;
   onCheckin: (kr: KeyResult) => void;
   onEdit?: () => void;
   onDelete?: () => void;
@@ -368,7 +354,7 @@ function KrLine({
   return (
     <tr className={kr.mine ? "okr-mine-row" : undefined}>
       <th scope="row" className="pn-name okr-c-name">
-        <span className="okr-kr-t">{kr.title}</span>
+        <span className="okr-kr-t" title={kr.title}>{kr.title}</span>
         <span className="okr-kr-sub">
           {kr.kind === "project" ? (
             kr.project_id ? (
@@ -403,10 +389,12 @@ function KrLine({
       ) : (
         <td className="pn-c-health okr-unrated">Sem avaliação</td>
       )}
-      <td className={`okr-c-cost${kr.cost ? "" : " muted"}`} title={fmtCostFull(kr.cost)}>
-        <span className="sr-only">Custo: </span>
-        {fmtCost(kr.cost)}
-      </td>
+      {hasCost && (
+        <td className={`okr-c-cost${kr.cost ? "" : " muted"}`} title={fmtCostFull(kr.cost)}>
+          <span className="sr-only">Custo: </span>
+          {fmtCost(kr.cost)}
+        </td>
+      )}
       <td className="okr-c-act">
         <span className="okr-acts">
           {kr.can_checkin && (
@@ -414,7 +402,7 @@ function KrLine({
               Check-in
             </button>
           )}
-          <button type="button" className="okr-icon" onClick={() => setHistory(true)} aria-label={`Histórico de ${kr.title}`} title="Histórico">
+          <button type="button" className="okr-icon okr-edit" onClick={() => setHistory(true)} aria-label={`Histórico de ${kr.title}`} title="Histórico">
             <History size={15} aria-hidden />
           </button>
           {onEdit && (

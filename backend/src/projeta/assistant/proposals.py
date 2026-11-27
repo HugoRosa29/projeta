@@ -9,6 +9,7 @@ Garantias (todas aplicadas no servidor, no momento da confirmação):
 
 from __future__ import annotations
 
+import contextlib
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -198,6 +199,7 @@ def _authorize_target(ctx: Ctx, kind: str, model: Any, workspace_id: str) -> Non
                 raise ForbiddenError()
         else:
             assert_can(membership(ctx, workspace_id), "project.create")
+            actions.ensure_new_project_name(ctx, workspace_id, model.project_name or "Novo projeto")
     elif kind == "status_note":
         if not project_access(ctx, model.project_id).can_manage:
             raise ForbiddenError()
@@ -221,6 +223,10 @@ def view(ctx: Ctx, row: dict) -> dict:
             preview = {"tasks": [], "can_write": False}
     else:
         preview = _preview_static(row["kind"], model)
+    if row["kind"] == "apply_wbs" and model.project_id:  # type: ignore[attr-defined]
+        # O cartão diz em qual projeto a EAP entra: nunca deixar dúvida entre existente e novo.
+        with contextlib.suppress(ForbiddenError):
+            preview = {**preview, "project": project_access(ctx, model.project_id).project["name"]}  # type: ignore[attr-defined]
     return {
         "id": row["id"],
         "kind": row["kind"],
@@ -331,6 +337,8 @@ def _exec_wbs(ctx: Ctx, ws: str, m: WbsPayload) -> dict:
         pid = m.project_id
         project = project_access(ctx, pid).project
     else:
+        # Revalida na confirmação: outra proposta pode ter criado o homônimo nesse meio-tempo.
+        actions.ensure_new_project_name(ctx, ws, m.project_name or "Novo projeto")
         project = projects.create_project(ctx, ws, m.project_name or "Novo projeto", m.summary)
         pid = project["id"]
     ids: dict[str, str] = {}
@@ -486,9 +494,9 @@ def confirm_proposal(ctx: Ctx, proposal_id: str) -> dict:
 
 def _links_from(result: dict) -> list[dict]:
     if "done" in result:
-        return [
-            {"label": d["label"], "href": d["href"]} for d in result["done"] if d.get("href")
-        ][:10]
+        return [{"label": d["label"], "href": d["href"]} for d in result["done"] if d.get("href")][
+            :10
+        ]
     if "project" in result:
         return [{"label": result["project"]["name"], "href": result["project"]["href"]}]
     return [

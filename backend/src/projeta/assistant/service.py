@@ -36,8 +36,8 @@ Como trabalhar:
 
 Alterações:
 7. Você não altera nada diretamente, mas pode preparar QUALQUER alteração que a pessoa faria na plataforma: projetos (dados, fase, arquivar, equipe, funções, convites, pastas, compartilhamento no organograma), tarefas (todos os campos, subtarefas, sprint, dependências, exclusão), comentários, fases, sprints, linhas de base, riscos, TAP/TEP, nota semanal, OKRs e check-ins, membros, convites e permissões do espaço, e as próprias preferências. A pessoa revisa a prévia e confirma na interface. Nunca diga que algo foi feito — diga que preparou uma proposta para confirmação.
-8. Escolha a ferramenta: propose_create_tasks, propose_update_task (estado, prazo, progresso, prioridade, responsável), propose_add_comment, propose_status_note e propose_wbs quando servirem; para todo o resto — ou para várias mudanças de uma vez (ex.: "conclua estas 5 tarefas", "feche a sprint e crie a próxima", "crie o objetivo com 3 KRs") — use propose_actions com um plano de passos. Consulte antes o que precisar (people, project_plan, risks, okrs, term, settings) para usar nomes que existem.
-9. Uma proposta por resposta. Se faltar informação essencial, pergunte em uma frase; se for detalhe, assuma um padrão razoável e diga qual. Se a ferramenta indicar ambiguidade, mostre as opções e peça que a pessoa escolha.
+8. Escolha a ferramenta: propose_create_tasks, propose_update_task (estado, prazo, progresso, prioridade, responsável), propose_add_comment, propose_status_note e propose_wbs quando servirem; para todo o resto — ou para várias mudanças de uma vez (ex.: "feche a sprint e crie a próxima", "crie o objetivo com 3 KRs") — use propose_actions com um plano de passos. Para a mesma mudança em muitas tarefas ("passe todas da fase Migração para a Ana", "adie em 1 semana o que vence este mês", "conclua as tarefas da sprint 2") use um único passo task.bulk_update com filtros, não um passo por tarefa. Consulte antes o que precisar (people, project_plan, risks, okrs, term, settings) para usar nomes que existem.
+9. Uma proposta por resposta. Seja leve: prefira propor um rascunho e deixar a pessoa ajustar a fazer uma lista de perguntas. Pergunte só o essencial (no máximo uma pergunta, em uma frase); detalhes você assume e diz qual padrão usou. Ao propor, escreva em uma ou duas frases o que vai acontecer — a prévia já mostra os detalhes, não os repita. Quando a pessoa pedir ajuste de uma proposta, prepare uma nova já ajustada (o histórico traz a anterior entre colchetes). Se a ferramenta indicar ambiguidade, mostre as opções e peça que a pessoa escolha.
 10. Ações marcadas como irreversíveis ou que mexem em acesso (excluir, remover pessoa, mudar perfil ou permissões, compartilhar tudo) só quando a pessoa pediu claramente; ao propor, diga em uma frase o que se perde ou quem passa a ver.
 11. Na nota semanal, a justificativa de um atraso só pode vir da pessoa: se faltar, pergunte; nunca a invente.
 12. Fora do seu alcance (diga como fazer pela tela): enviar arquivos (capa, foto, importação), exportar o espaço, entrar ou sair da conta e aceitar convite.
@@ -96,12 +96,64 @@ def get_or_create_conversation(ctx: Ctx, workspace_id: str, project_id: str | No
     return new["id"]
 
 
+STATUS_PT = {
+    "pending": "aguardando confirmação",
+    "confirmed": "confirmada",
+    "cancelled": "descartada",
+    "expired": "expirada",
+    "failed": "falhou",
+}
+
+
+def _clip_text(v: object, n: int = 60) -> str:
+    t = " ".join(str(v).split())
+    return t if len(t) <= n else t[: n - 1] + "…"
+
+
+def proposal_brief(kind: str, status: str, payload: dict) -> str:
+    """Resumo da proposta para o modelo: sem ele, "tire a fase de testes" não teria referência.
+
+    Vai entre colchetes, como dado do sistema; títulos são texto de pessoas e seguem como dados.
+    """
+    head = f"[Proposta {kind} — {STATUS_PT.get(status, status)}"
+    if kind == "apply_wbs":
+        phases = "; ".join(
+            f"{ph['name']}: " + ", ".join(_clip_text(t["title"], 40) for t in ph["tasks"])
+            for ph in payload.get("phases", [])
+        )
+        body = f"projeto {payload.get('project_name') or 'existente'}; {phases}"
+    elif kind == "create_tasks":
+        body = ", ".join(_clip_text(t["title"], 40) for t in payload.get("tasks", []))
+    elif kind == "actions":
+        body = "; ".join(
+            st["action"]
+            + " "
+            + ", ".join(
+                f"{k}={_clip_text(v, 40)}"
+                for k, v in st["params"].items()
+                if not k.endswith("_id") and k not in ("expected_version", "version")
+            )
+            for st in payload.get("steps", [])
+        )
+    else:
+        body = _clip_text(payload, 200)
+    return f"{head}: {_clip_text(body, 900)}]"
+
+
 def _history(ctx: Ctx, conversation_id: str) -> list[HistoryMessage]:
     rows = ctx.all(
-        "SELECT role, content FROM assistant_messages WHERE conversation_id=%s ORDER BY created_at DESC LIMIT %s",
+        "SELECT m.role, m.content, p.kind, p.status, p.payload FROM assistant_messages m "
+        "LEFT JOIN assistant_proposals p ON p.id = m.proposal_id "
+        "WHERE m.conversation_id=%s ORDER BY m.created_at DESC LIMIT %s",
         (conversation_id, HISTORY_TURNS),
     )
-    return [HistoryMessage(r["role"], r["content"][:1500]) for r in reversed(rows)]
+    out = []
+    for r in reversed(rows):
+        content = r["content"][:1500]
+        if r["kind"]:
+            content += "\n" + proposal_brief(r["kind"], r["status"], r["payload"] or {})
+        out.append(HistoryMessage(r["role"], content))
+    return out
 
 
 def _validate_scope(ctx: Ctx, workspace_id: str, project_id: str | None) -> str | None:

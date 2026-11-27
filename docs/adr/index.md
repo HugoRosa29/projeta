@@ -15,3 +15,4 @@ Decisões são de pessoas: agentes rascunham, pessoas aceitam.
 | [0009](0009-okrs-sobem-pelo-organograma.md) | OKRs sobem pelo organograma como os projetos | Proposto |
 | [0010](0010-linhas-de-base-do-cronograma.md) | Linhas de base do cronograma | Proposto |
 | [0011](0011-registro-de-riscos-do-projeto.md) | Registro de riscos do projeto (PMBOK) | Proposto |
+| [0012](0012-assistente-com-alcance-total.md) | Assistente com alcance total por plano de ações | Proposto |

@@ -99,7 +99,7 @@ describe("quadro do panorama", () => {
 
   it("dá cor de significado à situação e cores de categoria em sequência à fase", () => {
     expect(groupTracks(tracks, "pace").map((g) => g.color)).toEqual(["red", "orange", "green"]);
-    expect(groupTracks(tracks, "phase").map((g) => g.color)).toEqual(["blue", "purple", "gray"]);
+    expect(groupTracks(tracks, "phase").map((g) => g.color)).toEqual(["verde", "azul", "gray"]);
   });
 
   it("escreve o período da pílula e quanto dele já passou", () => {

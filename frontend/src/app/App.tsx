@@ -8,6 +8,7 @@ import { OkrPage } from "../features/okrs/OkrPage";
 import { PortfolioPage } from "../features/portfolio/PortfolioPage";
 import { ProfilePage } from "../features/profile/ProfilePage";
 import { ProjectPage } from "../features/projects/ProjectPage";
+import { ProjectReport } from "../features/projects/ProjectReport";
 import { ProjectsPage } from "../features/projects/ProjectsPage";
 import { SettingsPage } from "../features/settings/SettingsPage";
 import { MyTasksPage } from "../features/tasks/MyTasksPage";
@@ -32,6 +33,8 @@ function Protected() {
       <ProjectContextProvider>
         <Routes>
           <Route path="convite/:token" element={<InvitePage />} />
+          {/* Fora do layout: a folha do relatório ocupa a página inteira, como na impressão. */}
+          <Route path="projetos/:id/relatorio" element={<ProjectReport />} />
           <Route element={<AppLayout />}>
             <Route index element={<TodayPage />} />
             <Route path="projetos" element={<ProjectsPage />} />

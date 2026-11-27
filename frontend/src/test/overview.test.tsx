@@ -80,8 +80,8 @@ describe("Panorama", () => {
     expect(stat("Tarefas atrasadas")).toHaveTextContent("2");
     expect(within(board()).getByRole("link", { name: "ERP" })).toHaveAttribute("href", "/projetos/ERP");
     expect(groups()).toEqual(["Atrasado", "Em risco", "Em dia"]);
-    // Cada grupo tem a própria linha de resumo, com a média de progresso.
-    expect(within(screen.getByRole("table", { name: "Atrasado" })).getByText("Média do grupo:").parentElement).toHaveTextContent("80%");
+    // O cabeçalho do grupo traz a contagem e a média de progresso, sem linha de resumo à parte.
+    expect(within(screen.getByRole("table", { name: "Atrasado" })).getByRole("columnheader", { name: /Atrasado/ })).toHaveTextContent("1 projeto · média 80%");
     // Agrupado por situação, a coluna Situação seria repetição.
     expect(within(board()).queryAllByRole("columnheader", { name: "Situação" })).toHaveLength(0);
   });

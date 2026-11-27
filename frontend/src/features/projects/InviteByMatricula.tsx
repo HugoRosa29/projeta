@@ -44,7 +44,7 @@ export function InviteByMatricula({ projectId }: { projectId: string }) {
           if (matricula.trim()) invite.mutate(matricula.trim());
         }}
       >
-        <label htmlFor="invite-matricula">Convidar pela matrícula do GIA</label>
+        <label htmlFor="invite-matricula">Quem ainda não entrou no PROJETA: convidar pela matrícula do GIA</label>
         <div className="row">
           <input
             id="invite-matricula"

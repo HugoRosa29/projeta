@@ -18,6 +18,7 @@ from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from functools import lru_cache
 from typing import Any, Literal
+from zoneinfo import ZoneInfo
 
 from pydantic import BaseModel, Field, ValidationError
 
@@ -130,9 +131,11 @@ def _find_project(s: Session, name: str) -> str:
     if not q:
         raise AppError("Informe o nome do projeto.")
     rows = s.ctx.all(
-        f"""SELECT p.id, p.name, p.status FROM projects p
+        f"""SELECT p.id, p.name, p.status, p.created_at,
+          (SELECT count(*) FROM tasks t WHERE t.project_id = p.id)::int AS n_tasks
+        FROM projects p
         WHERE p.workspace_id = %(ws)s AND {VISIBLE_PROJECT} AND p.name ILIKE %(q)s
-        ORDER BY p.status, p.name LIMIT 10""",
+        ORDER BY p.status, p.name, p.created_at LIMIT 10""",
         {"ws": s.workspace_id, "uid": s.ctx.user_id, "q": _like(q)},
     )
     if not rows:
@@ -144,10 +147,33 @@ def _find_project(s: Session, name: str) -> str:
         return exact[0]["id"]
     if len(rows) == 1:
         return rows[0]["id"]
-    names = "; ".join(_clip(r["name"], 60) for r in rows)
-    raise AppError(
-        f"Mais de um projeto corresponde a “{_clip(q, 60)}”: {names}. Pergunte qual é o certo."
+    # Homônimos só se distinguem por dados do sistema: vão o id (para a próxima chamada), a
+    # criação e o tamanho (para a pessoa reconhecer qual é qual).
+    names = "; ".join(
+        f"{_clip(r['name'], 60)} (id {r['id']}, criado em "
+        f"{r['created_at'].astimezone(ZoneInfo(s.timezone)).strftime('%d/%m %H:%M')}, "
+        f"{r['n_tasks']} tarefas{', arquivado' if r['status'] == 'archived' else ''})"
+        for r in rows
     )
+    raise AppError(
+        f"Mais de um projeto corresponde a “{_clip(q, 60)}”: {names}. Pergunte qual é o certo "
+        "e use o project_id escolhido."
+    )
+
+
+def _existing_project(s: Session, name: str) -> str | None:
+    """Projeto visível com exatamente esse nome (sem acento/caixa), ou None. Homônimos: erro."""
+    q = name.strip()
+    if not q:
+        return None
+    rows = s.ctx.all(
+        f"SELECT p.id, p.name FROM projects p WHERE p.workspace_id = %(ws)s AND {VISIBLE_PROJECT}",
+        {"ws": s.workspace_id, "uid": s.ctx.user_id},
+    )
+    exact = [r for r in rows if _norm(r["name"]) == _norm(q)]
+    if len(exact) > 1:
+        _find_project(s, q)  # levanta o erro com os dados para desempatar
+    return exact[0]["id"] if exact else None
 
 
 def _pid(s: Session, project_id: str | None, project_name: str | None = None) -> str:
@@ -384,7 +410,8 @@ class WbsPhaseArg(BaseModel):
 
 class ProposeWbsArgs(BaseModel):
     project_name: str | None = Field(
-        default=None, description="nome do novo projeto, se não houver projeto em tela"
+        default=None,
+        description="nome do projeto; se já existir um com esse nome, a EAP entra nele, senão cria um novo",
     )
     project_id: str | None = None
     summary: str = ""
@@ -941,9 +968,17 @@ def tool_project_plan(s: Session, a: ProjectArg) -> dict:
             "sprints": [
                 {
                     k: x.get(k)
-                    for k in ("number", "name", "status", "start_date", "end_date", "goal",
-                              "capacity_minutes", "stats")
-                }  # fmt: skip
+                    for k in (
+                        "number",
+                        "name",
+                        "status",
+                        "start_date",
+                        "end_date",
+                        "goal",
+                        "capacity_minutes",
+                        "stats",
+                    )
+                }
                 for x in sp["sprints"]
             ],
             "backlog_em_aberto": sp["backlog_open"],
@@ -997,7 +1032,11 @@ def tool_term(s: Session, a: TermArgs) -> dict:
     t = formal.get_term(s.ctx, pid, a.kind)
     fields = formal.TAP_FIELDS if a.kind == "tap" else formal.TEP_FIELDS
     return _data(
-        {"campos_possiveis": list(fields), "conteudo": t["content"], "atualizado_em": t["updated_at"]}
+        {
+            "campos_possiveis": list(fields),
+            "conteudo": t["content"],
+            "atualizado_em": t["updated_at"],
+        }
     )
 
 
@@ -1037,7 +1076,9 @@ def _pick(rows: list[dict], q: str, what: str) -> str:
     if len(hits) == 1:
         return hits[0]["id"]
     if not hits:
-        raise AppError(f"Não encontrei {what} “{_clip(q, 60)}”. Consulte antes os nomes existentes.")
+        raise AppError(
+            f"Não encontrei {what} “{_clip(q, 60)}”. Consulte antes os nomes existentes."
+        )
     opts = "; ".join(f"{_clip(r['label'], 50)} (id {r['id']})" for r in hits[:8])
     raise AppError(f"Mais de um(a) {what} corresponde a “{_clip(q, 60)}”: {opts}. Pergunte qual.")
 
@@ -1050,10 +1091,7 @@ def _unique_task(s: Session, q: str, project_id: str | None) -> str:
     if not rows and scope:
         rows = tasks.search_visible(s.ctx, s.workspace_id, query=q, include_done=True, limit=8)
     return _pick(
-        [
-            {"id": r["id"], "label": r["title"], "p": r["project_name"] or "pessoal"}
-            for r in rows
-        ],
+        [{"id": r["id"], "label": r["title"], "p": r["project_name"] or "pessoal"} for r in rows],
         q,
         "tarefa",
     )
@@ -1129,7 +1167,7 @@ def _lookup(s: Session, key: str, q: str, project_id: str | None) -> str:
 
 
 _TASK_KEYS = ("task_id", "depends_on_id", "parent_id")
-_PERSON_KEYS = ("user_id", "owner_id", "assignee_id")
+_PERSON_KEYS = ("user_id", "owner_id", "assignee_id", "where_assignee_id")
 _LOOKUP_KEYS = (
     "sprint_id",
     "risk_id",
@@ -1143,7 +1181,17 @@ _LOOKUP_KEYS = (
 _REF_KEY = {v: k for k, v in actions.REF_OF.items()}  # "project" -> "project_id"
 
 
-def _resolve_refs(s: Session, fields: dict, raw: dict, default_project: bool) -> dict:
+def _resolve_refs(
+    s: Session, fields: dict, raw: dict, default_project: bool, created: dict | None = None
+) -> dict:
+    """Nomes -> ids. `created` = (campo, nome) -> "@passo:N" do que passos anteriores criam."""
+    created = created or {}
+
+    def planned(key: str, q: str, find: Any) -> str:
+        # Algo criado antes no plano tem precedência: ainda não existe no banco.
+        ref = created.get((key, _norm(q)))
+        return ref if ref else find()
+
     p = dict(raw)
     for ref, idf in _REF_KEY.items():
         if ref in p and idf in fields:
@@ -1152,26 +1200,40 @@ def _resolve_refs(s: Session, fields: dict, raw: dict, default_project: bool) ->
             p[idf] = p.pop(ref)
     if default_project and not p.get("project_id") and s.project_id:
         p["project_id"] = s.project_id
-    if isinstance(p.get("project_id"), str) and not is_uuid(p["project_id"]):
-        p["project_id"] = _find_project(s, p["project_id"])
+    pv = p.get("project_id")
+    if isinstance(pv, str) and not is_uuid(pv) and not actions.STEP_REF.match(pv):
+        p["project_id"] = planned("project_id", pv, lambda: _find_project(s, pv))
     for k in _TASK_KEYS:
-        if isinstance(p.get(k), str) and not is_uuid(p[k]):
-            p[k] = _unique_task(s, p[k], p.get("project_id"))
+        v = p.get(k)
+        if isinstance(v, str) and not is_uuid(v) and not actions.STEP_REF.match(v):
+            proj = p.get("project_id") if is_uuid(p.get("project_id")) else None
+            p[k] = planned(k, v, lambda v=v, proj=proj: _unique_task(s, v, proj))
     # Projeto de contexto para sprint/fase/risco: o informado, o da tarefa ou o em tela.
-    ctx_project = p.get("project_id")
+    ctx_project = p.get("project_id") if is_uuid(p.get("project_id")) else None
     if not ctx_project and is_uuid(p.get("task_id")):
         ctx_project = task_access(s.ctx, p["task_id"]).task["project_id"]
-    ctx_project = ctx_project or s.project_id
+    if not ctx_project and not p.get("project_id"):
+        ctx_project = s.project_id
     for k in _PERSON_KEYS:
         if isinstance(p.get(k), str) and not is_uuid(p[k]):
             p[k] = _one_person(s, p[k])
+    # Filtro "responsável: ninguém" é "sem responsável" — nunca "sem filtro" (pegaria todas).
+    if "where_assignee_id" in p and p["where_assignee_id"] is None:
+        del p["where_assignee_id"]
+        p["where_unassigned"] = True
+    v = p.get("where_sprint_id")
+    if isinstance(v, str) and not is_uuid(v) and not actions.STEP_REF.match(v):
+        p["where_sprint_id"] = planned(
+            "sprint_id", v, lambda: _lookup(s, "sprint_id", v, ctx_project)
+        )
     for k in _LOOKUP_KEYS:
-        if isinstance(p.get(k), str) and not is_uuid(p[k]):
-            p[k] = _lookup(s, k, p[k], ctx_project)
+        v = p.get(k)
+        if isinstance(v, str) and not is_uuid(v) and not actions.STEP_REF.match(v):
+            p[k] = planned(k, v, lambda k=k, v=v: _lookup(s, k, v, ctx_project))
     if isinstance(p.get("key_results"), list):  # KRs criados junto com o objetivo
         kr_fields = actions.NewKr.model_fields
         p["key_results"] = [
-            _resolve_refs(s, kr_fields, x, False) if isinstance(x, dict) else x
+            _resolve_refs(s, kr_fields, x, False, created) if isinstance(x, dict) else x
             for x in p["key_results"]
         ]
     return p
@@ -1203,6 +1265,23 @@ def _stamp(s: Session, name: str, p: dict, seen: set) -> None:
             p.setdefault(
                 "expected_version", formal.get_term(s.ctx, p["project_id"], p["kind"])["version"]
             )
+    elif name == "task.bulk_update" and "task_ids" not in p:
+        # Congela a seleção: a prévia lista exatamente estas tarefas, com as versões de agora.
+        try:
+            model = actions.parse(name, p)
+        except ValueError as e:
+            raise AppError(str(e)) from e
+        rows = actions.select_tasks(s.ctx, model)  # type: ignore[arg-type]
+        if not rows:
+            raise AppError(
+                "Nenhuma tarefa do projeto corresponde a esses filtros. Revise a seleção."
+            )
+        if len(rows) > actions.MAX_BULK:
+            raise AppError(
+                f"Os filtros pegam mais de {actions.MAX_BULK} tarefas. Refine ou divida em dois passos."
+            )
+        p["task_ids"] = [r["id"] for r in rows]
+        p["expected_versions"] = {r["id"]: r["version"] for r in rows}
     if key:
         seen.add(key)
 
@@ -1316,7 +1395,16 @@ def tool_propose_status_note(s: Session, a: ProposeStatusNoteArgs) -> dict:
 
 def tool_propose_wbs(s: Session, a: ProposeWbsArgs) -> dict:
     start = proposals.default_start(s.ctx)
-    pid = a.project_id or s.project_id
+    if a.project_id and not is_uuid(a.project_id):
+        raise AppError("project_id inválido. Use project_name com o nome do projeto.")
+    # Nome de projeto que já existe = aquele projeto, nunca um homônimo novo.
+    # Sem nome, vale o projeto em tela; nome novo = projeto novo (mesmo com outro em tela).
+    if a.project_id:
+        pid = a.project_id
+    elif a.project_name and a.project_name.strip():
+        pid = _existing_project(s, a.project_name)
+    else:
+        pid = s.project_id
     total = sum(len(p.tasks) for p in a.phases)
     if total > MAX_WBS_TASKS:
         raise AppError(f"A EAP pode ter no máximo {MAX_WBS_TASKS} tarefas; reduza o escopo.")
@@ -1368,21 +1456,32 @@ class ProposeActionsArgs(BaseModel):
 
 
 def tool_propose_actions(s: Session, a: ProposeActionsArgs) -> dict:
-    steps, seen = [], set()
+    steps: list[dict] = []
+    seen: set = set()
+    created: dict[tuple[str, str], str] = {}
     for i, st in enumerate(a.steps, 1):
         fields = actions.BY_NAME[st.action].params.model_fields
         try:
-            p = _resolve_refs(s, fields, st.params, actions.needs_project(st.action))
+            p = _resolve_refs(s, fields, st.params, actions.needs_project(st.action), created)
             _stamp(s, st.action, p, seen)
         except AppError as e:
             raise AppError(f"Passo {i} ({st.action}): {e.message}") from e
         steps.append({"action": st.action, "params": p})
+        if st.action in actions.CREATES:
+            keys, name_field = actions.CREATES[st.action]
+            if isinstance(p.get(name_field), str) and p[name_field].strip():
+                for k in keys:
+                    created[(k, _norm(p[name_field]))] = f"@passo:{i}"
     view = _store_proposal(s, "actions", {"steps": steps})
     danger = view["preview"].get("danger")
     return _proposed(
         view,
         "Resuma o plano em tópicos curtos e peça para a pessoa revisar e confirmar. Nada foi feito ainda."
-        + (" Avise que há ação irreversível ou que mexe em acesso (marcada na prévia)." if danger else ""),
+        + (
+            " Avise que há ação irreversível ou que mexe em acesso (marcada na prévia)."
+            if danger
+            else ""
+        ),
     )
 
 

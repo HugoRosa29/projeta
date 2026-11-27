@@ -1,12 +1,14 @@
-import { useQueryClient } from "@tanstack/react-query";
-import { CalendarDays, CheckSquare, FolderKanban, House, LayoutDashboard, MessageCircle, Settings, Target, UserRound } from "lucide-react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { CalendarDays, CheckSquare, FolderKanban, House, LayoutDashboard, MessageCircle, Settings, Target } from "lucide-react";
 import { useCallback, useMemo, useState } from "react";
 import { NavLink, Outlet } from "react-router";
+import { Avatar } from "../components/Avatar";
 import { Logo } from "../components/ui";
 import { ThemeToggle } from "../components/ThemeToggle";
 import { Skyline } from "../components/Skyline";
 import { useMotion } from "../components/motion";
 import { AssistantPanel } from "../features/assistant/AssistantPanel";
+import type { Profile } from "../features/profile/ProfilePage";
 import { api } from "../services/api";
 import { AssistantContext } from "./assistantContext";
 import { useProjectContext } from "./projectContext";
@@ -24,6 +26,8 @@ const LINKS = [
 
 export function AppLayout() {
   const { user, workspaces, workspace, setWorkspaceId } = useSession();
+  // Mesma consulta da página de perfil: trocar ou remover a foto lá já atualiza o menu.
+  const profile = useQuery({ queryKey: ["me", "profile"], queryFn: () => api.get<Profile>("/me/profile"), staleTime: 60_000 });
   const { project } = useProjectContext();
   const [assistantOpen, setAssistantOpen] = useState(false);
   const [expanded, setExpanded] = useState(false);
@@ -57,7 +61,7 @@ export function AppLayout() {
         </nav>
         <div className="nav-art"><Skyline onLight chips={false} /></div>
         <div className="nav-foot">
-          <NavLink to="/perfil" className="coord nav-profile" title="Ver seu perfil"><UserRound size={16} aria-hidden /> {user.name}</NavLink>
+          <NavLink to="/perfil" className="coord nav-profile" title="Ver seu perfil"><Avatar id={user.id} name={user.name} photoVersion={profile.data?.photo_version} size={28} /> {user.name}</NavLink>
           <button className="btn btn-ghost" onClick={logout}>Sair</button>
         </div>
       </aside>
@@ -71,7 +75,7 @@ export function AppLayout() {
             </select>
             <span className="spacer" />
             <ThemeToggle />
-            <NavLink to="/perfil" className="btn btn-ghost btn-sm topbar-profile" aria-label="Seu perfil"><UserRound size={18} aria-hidden /></NavLink>
+            <NavLink to="/perfil" className="btn btn-ghost btn-sm topbar-profile" aria-label="Seu perfil"><Avatar id={user.id} name={user.name} photoVersion={profile.data?.photo_version} size={28} /></NavLink>
             <button className="btn btn-primary btn-sm" aria-expanded={assistantOpen} aria-controls="assistant" onClick={() => setAssistantOpen((v) => !v)}>
               <MessageCircle size={18} aria-hidden /> Assistente
             </button>

@@ -121,6 +121,8 @@ export interface Member {
   email: string;
   role: Role;
   project_roles?: string[];
+  /** Data da última troca da foto; nula quando a pessoa não tem foto. */
+  photo_version?: string | null;
 }
 export interface ActivityItem {
   id: string;

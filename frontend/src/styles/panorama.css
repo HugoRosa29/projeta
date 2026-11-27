@@ -3,7 +3,7 @@
 .pn-head { display: flex; align-items: center; justify-content: space-between; gap: 8px 16px; flex-wrap: wrap; margin-bottom: 10px; }
 .pn-title { display: flex; align-items: baseline; flex-wrap: wrap; gap: 2px 10px; min-width: 0; }
 .pn-title h2 { font-size: 1.25rem; }
-.pn-title p { margin: 0; font-size: 0.8125rem; }
+.pn-title p, .pn-recorte { margin: 0; font-size: 0.8125rem; }
 .pn-tools { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .pn-select { width: auto; max-width: 200px; min-height: 34px; padding: 4px 10px; font-size: 0.8125rem; }
 .pn-groupby { display: inline-flex; align-items: center; gap: 6px; font-size: 0.8125rem; color: var(--ink-60); }
@@ -12,35 +12,48 @@
 /* Números do topo: uma faixa só, sem gráficos. */
 .pn-stats { list-style: none; margin: 0 0 12px; padding: 0; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--surface); overflow: hidden; }
 .pn-stat + .pn-stat { border-left: 1px solid var(--line); }
-.pn-stat > div, .pn-stat > button { width: 100%; height: 100%; display: grid; gap: 2px; padding: 10px 14px; text-align: left; border: 0; background: none; color: inherit; font: inherit; }
+/* Número e rótulo na mesma linha (faixa baixa) e um traço de cor Terracap por indicador:
+   azul para volume, verde para conclusão, dourado para risco, alerta para atraso. */
+.pn-stat { --accent: var(--azul); }
+.pn-stat:nth-child(2) { --accent: var(--verde); }
+.pn-stat.pn-warn { --accent: var(--dourado); }
+.pn-stat.pn-bad { --accent: var(--chart-bad); }
+.pn-stat > div, .pn-stat > button { width: 100%; height: 100%; display: flex; align-items: baseline; flex-wrap: wrap; gap: 2px 8px; padding: 9px 14px 7px; text-align: left; border: 0; background: none; color: inherit; font: inherit; box-shadow: inset 0 3px 0 var(--accent); }
 .pn-stat > button { cursor: pointer; }
 .pn-stat > button:hover { background: var(--paper); }
-.pn-stat > button[aria-pressed="true"] { background: var(--azul-tint); box-shadow: inset 0 -3px 0 var(--azul); }
-.pn-stat-v { font: 700 1.5rem/1.1 var(--body); font-variant-numeric: tabular-nums; color: var(--ink); }
+.pn-stat > button[aria-pressed="true"] { background: var(--azul-tint); box-shadow: inset 0 3px 0 var(--accent), inset 0 -3px 0 var(--azul); }
+.pn-stat-v { font: 700 1.375rem/1.1 var(--body); font-variant-numeric: tabular-nums; color: var(--ink); }
 .pn-stat-l { font-size: 0.75rem; color: var(--ink-60); }
 .pn-stat.pn-bad .pn-stat-v { color: var(--chart-bad); }
-.pn-stat.pn-warn .pn-stat-v { color: var(--alerta); }
+.pn-stat.pn-warn .pn-stat-v { color: var(--dourado-deep); }
 .pn-bad { color: var(--chart-bad); font-weight: 600; }
 
 /* Quadro no formato de board: cada grupo tem título na sua cor, cabeçalho próprio, faixa de
    cor à esquerda das linhas, células cinza-claro separadas por fios e uma linha de resumo. */
-.g-blue { --g: #3f7fe0; } .g-purple { --g: #9a52d6; } .g-teal { --g: #138f8a; } .g-pink { --g: #d1478c; }
-.g-navy { --g: #2d4f8f; } .g-olive { --g: #6f7f1f; } .g-brown { --g: #9a6337; }
-.g-green { --g: #00a35c; } .g-orange { --g: #e08a1e; } .g-red { --g: #d83a52; } .g-gray { --g: #8a8f98; }
+/* Cores Terracap. --g pinta título, faixa e etiqueta; --g-on é o texto sobre ela (o dourado pede
+   texto escuro para ter contraste). Os tokens já trazem o par do modo escuro. */
+.g-verde, .g-green { --g: var(--chart-ok); --g-on: var(--chart-on-ok); }
+.g-azul, .g-blue { --g: var(--azul); --g-on: var(--surface); }
+.g-dourado, .g-orange { --g: var(--chart-warn); --g-on: var(--chart-on-warn); }
+.g-red { --g: var(--chart-bad); --g-on: var(--chart-on-bad); }
+.g-verde-deep { --g: var(--verde-deep); --g-on: var(--surface); }
+.g-azul-deep { --g: var(--chart-info); --g-on: var(--chart-on-info); }
+.g-dourado-deep { --g: var(--dourado-deep); --g-on: #1d2420; }
+.g-grafite, .g-gray { --g: var(--ink-60); --g-on: var(--surface); }
 
-.pn-board-wrap { position: relative; overflow-y: auto; overflow-x: hidden; display: grid; align-content: start; gap: 22px; padding: 2px 2px 8px 0; }
+.pn-board-wrap { position: relative; overflow-y: auto; overflow-x: hidden; display: grid; align-content: start; gap: 14px; padding: 2px 2px 8px 0; }
 .pn-board { width: 100%; table-layout: fixed; border-collapse: separate; border-spacing: 0; font-size: 0.875rem; }
-.pn-board th, .pn-board td { height: 38px; padding: 0 10px; text-align: center; font-weight: 400; vertical-align: middle; }
+.pn-board th, .pn-board td { height: 34px; padding: 0 10px; text-align: center; font-weight: 400; vertical-align: middle; }
 .pn-board tbody td, .pn-board tbody th { background: var(--paper); border-right: 1px solid var(--surface); border-bottom: 1px solid var(--surface); }
 .pn-board tbody tr:hover > * { background: var(--paper-deep); }
 
 /* Cabeçalho do grupo: o título ocupa a coluna do nome; as demais trazem o nome da coluna. */
-.pn-board thead th { height: 40px; font-size: 0.8125rem; color: var(--ink-60); border-bottom: 1px solid var(--line); }
+.pn-board thead th { height: 34px; font-size: 0.8125rem; color: var(--ink-60); border-bottom: 1px solid var(--line); }
 .pn-gtitle { text-align: left !important; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-left: 0 !important; }
 .pn-gtitle button { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; min-height: 34px; padding: 0 6px 0 0; border: 0; background: none; color: var(--g); font: inherit; cursor: pointer; vertical-align: middle; }
-.pn-chev { flex: none; padding: 2px; border-radius: 50%; background: var(--g); color: #fff; transition: rotate 0.2s; }
+.pn-chev { flex: none; padding: 2px; border-radius: 50%; background: var(--g); color: var(--g-on, #fff); transition: rotate 0.2s; }
 .pn-gtitle button[aria-expanded="false"] .pn-chev { rotate: -90deg; }
-.pn-group-l { overflow: hidden; text-overflow: ellipsis; font-size: 1.125rem; font-weight: 600; }
+.pn-group-l { overflow: hidden; text-overflow: ellipsis; font-size: 1rem; font-weight: 700; }
 .pn-count { margin-left: 6px; font-size: 0.75rem; color: var(--ink-60); vertical-align: middle; }
 
 .pn-name { text-align: left !important; box-shadow: inset 6px 0 0 var(--g); padding-left: 16px !important; }
@@ -48,7 +61,7 @@
 .pn-name a:hover { color: var(--azul); text-decoration: underline; }
 
 /* Situação: etiqueta que ocupa a célula, como a coluna de status de um board. */
-.pn-board td.pn-label { background: var(--g); color: #fff; font-weight: 500; white-space: nowrap; }
+.pn-board td.pn-label { background: var(--g); color: var(--g-on, #fff); font-weight: 500; white-space: nowrap; }
 
 /* Larguras fixas das colunas de dado; o nome fica com o resto. */
 .pn-c-health { width: 118px; }
@@ -61,12 +74,12 @@
 
 /* Bateria de progresso. */
 .pn-bat { display: flex; align-items: center; gap: 8px; }
-.pn-bat-track { flex: 1; height: 22px; border-radius: 3px; background: color-mix(in srgb, var(--ink-60) 22%, var(--surface)); overflow: hidden; }
-.pn-bat-fill { display: block; height: 100%; background: #00a35c; }
+.pn-bat-track { flex: 1; height: 16px; border-radius: 3px; background: color-mix(in srgb, var(--ink-60) 22%, var(--surface)); overflow: hidden; }
+.pn-bat-fill { display: block; height: 100%; background: var(--verde); }
 .pn-bat-v { min-width: 2.6em; text-align: right; font-size: 0.8125rem; font-variant-numeric: tabular-nums; color: var(--ink-60); }
 
 /* Pílula da timeline: cor do grupo até hoje, o resto mais claro. */
-.pn-pill { display: block; padding: 4px 10px; border-radius: 999px; color: #fff; font-size: 0.8125rem; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+.pn-pill { display: block; padding: 2px 10px; border-radius: 999px; color: var(--g-on, #fff); font-size: 0.8125rem; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   background: linear-gradient(90deg, var(--g) var(--done, 0%), color-mix(in srgb, var(--g) 55%, #6b7078) var(--done, 0%)); }
 .pn-pill-none { background: none; color: var(--ink-60); font-weight: 400; }
 
@@ -154,8 +167,8 @@
 .ab-clickable { cursor: pointer; transition: border-color 0.2s, box-shadow 0.3s cubic-bezier(0.32, 0.72, 0, 1), transform 0.3s cubic-bezier(0.32, 0.72, 0, 1); }
 .ab-clickable:hover { border-color: color-mix(in srgb, var(--azul) 35%, var(--line)); box-shadow: 0 10px 28px -18px color-mix(in srgb, var(--ink) 55%, transparent); transform: translateY(-2px); }
 .ab-clickable:active { transform: translateY(0) scale(0.995); }
-.ab-clickable .ab-name { cursor: inherit; }
-.ab-clickable .ab-name::after { content: none; }
+/* Cabeçalho da área expandida: clicar nele recolhe. */
+.ab-head-collapse { cursor: pointer; }
 .ab-block:hover .ab-toggle, .ab-toggle:focus-visible { opacity: 1; }
 
 /* Área expandida: ocupa a largura e as demais viram uma coluna estreita ao lado. Os mini-blocos
@@ -169,7 +182,11 @@
 .ab-mini-btn { display: grid; gap: 6px; width: 100%; height: 100%; align-content: center; padding: 8px 10px; border: 0; border-radius: inherit; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; transition: background 0.2s; }
 .ab-mini-btn:hover { background: var(--paper); }
 .ab-mini-btn:focus-visible { outline: 2px solid var(--azul); outline-offset: -2px; }
-.ab-mini-btn .ab-title-row { flex-wrap: nowrap; }
+/* Coluna presa à largura do cartão: sem isto a trilha do grid cresce até o nome inteiro caber
+   e o nome longo empurra contagem e selos para fora, em vez de ganhar reticências. */
+.ab-mini-btn { grid-template-columns: minmax(0, 1fr); }
+.ab-mini-btn .ab-title-row { flex-wrap: nowrap; min-width: 0; }
+.ab-mini-n, .ab-mini .ab-alert { flex: none; }
 .ab-mini-name { margin-right: auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 600 0.875rem/1.2 var(--display); }
 .ab-mini-n { font-size: 0.75rem; color: var(--ink-60); font-variant-numeric: tabular-nums; }
 .ab-mini .ab-alert { min-width: 20px; text-align: center; }
@@ -181,35 +198,44 @@
 .ab-item { transition: background 0.15s, border-color 0.15s, transform 0.25s cubic-bezier(0.32, 0.72, 0, 1), box-shadow 0.25s; }
 .ab-item:hover { transform: translateY(-1px); box-shadow: inset 0 3px 0 var(--g), 0 6px 16px -10px color-mix(in srgb, var(--ink) 45%, transparent); }
 
-/* Transição entre mosaico e área expandida (View Transitions): blocos, cabeçalhos e projetos
-   deslizam e mudam de tamanho na mesma curva de mola amortecida, como no iOS, e no mesmo tempo.
-   O cartão do bloco é desenhado pelo próprio grupo da transição (fundo, borda e raio de verdade,
-   que crescem sem deformar); a "foto" do bloco fica oculta. O cabeçalho anima à parte, no tamanho
-   natural, ancorado no canto: desliza junto com a borda, sem ser esticado nem dar zoom. */
+/* Transição entre mosaico e área expandida (View Transitions). Blocos, cabeçalhos e projetos
+   deslizam e mudam de tamanho juntos numa curva de desaceleração longa (ease-out quint): partem
+   rápido e assentam devagar, sem quique. O cartão do bloco é desenhado pelo próprio grupo da
+   transição (fundo, borda e raio de verdade, que crescem sem deformar); a "foto" do bloco fica
+   oculta. O cabeçalho anima à parte, no tamanho natural, ancorado no canto: desliza com a borda,
+   sem ser esticado nem dar zoom. */
 .ab-block { view-transition-class: ab-block; }
 .ab-head, .ab-mini-btn { view-transition-class: ab-head; }
 .ab-item { view-transition-class: ab-item; }
+:root { --ab-dur: 0.48s; --ab-ease: cubic-bezier(0.22, 1, 0.36, 1); }
 ::view-transition-group(*.ab-block), ::view-transition-group(*.ab-head), ::view-transition-group(*.ab-item) {
-  animation-duration: 0.5s;
-  animation-timing-function: cubic-bezier(0.32, 0.72, 0, 1);
+  animation-duration: var(--ab-dur);
+  animation-timing-function: var(--ab-ease);
 }
 ::view-transition-group(*.ab-block) { box-sizing: border-box; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--surface); }
 ::view-transition-old(*.ab-block), ::view-transition-new(*.ab-block) { animation: none; opacity: 0; }
+/* Cabeçalho e projetos que existem antes e depois: dissolvência cruzada contínua, as duas
+   imagens ao mesmo tempo e na mesma curva. Somadas (plus-lighter, padrão da transição) a
+   opacidade fica sempre cheia; antes uma sumia antes de a outra chegar e o nome piscava. */
 ::view-transition-old(*.ab-head), ::view-transition-new(*.ab-head) { width: auto; height: auto; }
-::view-transition-old(*.ab-head) { animation: 0.1s ease-out both ab-out; }
-::view-transition-new(*.ab-head) { animation: 0.24s cubic-bezier(0.32, 0.72, 0, 1) 0.06s both ab-in; }
+::view-transition-old(*.ab-head) { animation: 0.24s ease-out both ab-out; }
+::view-transition-new(*.ab-head) { animation: 0.24s ease-out both ab-in; }
 ::view-transition-old(root), ::view-transition-new(root) { animation-duration: 0.3s; }
-/* Projetos: o cartão cresce como uma janela que revela o conteúdo no tamanho final, sem zoom no
-   texto. O de antes some rápido para não deixar fantasma; os que saem de cena (das áreas que viram
-   coluna) somem logo e os que entram aparecem quando o movimento já assentou. */
+/* Projetos: o cartão cresce como uma janela que revela o conteúdo no tamanho final, sem zoom
+   no texto. */
 ::view-transition-group(*.ab-item) { overflow: clip; clip-path: inset(0 round var(--radius-sm, 8px)); }
 ::view-transition-old(*.ab-item), ::view-transition-new(*.ab-item) { width: auto; height: auto; object-fit: none; object-position: left top; }
-::view-transition-old(*.ab-item) { animation: 0.1s ease-out both ab-out; }
-::view-transition-new(*.ab-item) { animation: 0.26s cubic-bezier(0.32, 0.72, 0, 1) 0.06s both ab-in; }
-::view-transition-old(*.ab-item):only-child { animation: 0.14s ease-out both ab-out; }
-::view-transition-new(*.ab-item):only-child { animation: 0.3s cubic-bezier(0.32, 0.72, 0, 1) 0.2s both ab-in; }
+::view-transition-old(*.ab-item) { animation: 0.26s ease-out both ab-out; }
+::view-transition-new(*.ab-item) { animation: 0.26s ease-out both ab-in; }
+/* Projetos que saem de cena (das áreas que viram coluna): recuam e somem logo, em vez de ficar
+   parados no lugar antigo enquanto o bloco encolhe. Os que entram chegam com um leve assentar,
+   quando o bloco já está quase no tamanho final. */
+::view-transition-old(*.ab-item):only-child { animation: 0.16s ease-in both ab-leave; }
+::view-transition-new(*.ab-item):only-child { animation: 0.36s var(--ab-ease) 0.16s both ab-enter; }
 @keyframes ab-out { to { opacity: 0; } }
 @keyframes ab-in { from { opacity: 0; } }
+@keyframes ab-leave { to { opacity: 0; transform: scale(0.96); } }
+@keyframes ab-enter { from { opacity: 0; transform: translateY(6px) scale(0.98); } }
 @media (prefers-reduced-motion: reduce) {
   ::view-transition-group(*), ::view-transition-old(*), ::view-transition-new(*) { animation: none !important; }
   .ab-item, .ab-toggle, .ab-clickable { transition: none; }

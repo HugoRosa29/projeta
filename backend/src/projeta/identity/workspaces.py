@@ -113,7 +113,9 @@ def set_permissions(ctx: Ctx, workspace_id: str, permissions: dict[str, list[str
 def list_members(ctx: Ctx, workspace_id: str) -> list[dict]:
     role_in(ctx, workspace_id)
     return ctx.all(
-        "SELECT u.id, u.name, u.email, wm.role FROM workspace_members wm "
+        "SELECT u.id, u.name, u.email, wm.role, "
+        "(SELECT f.updated_at FROM user_photos f WHERE f.user_id = u.id) AS photo_version "
+        "FROM workspace_members wm "
         "JOIN users u ON u.id = wm.user_id WHERE wm.workspace_id = %s ORDER BY u.name",
         (workspace_id,),
     )

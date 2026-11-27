@@ -12,6 +12,7 @@ import "./styles/sprints.css";
 import "./styles/project.css";
 import "./styles/gantt.css";
 import "./styles/risk.css";
+import "./styles/report.css";
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { staleTime: 15_000, refetchOnWindowFocus: false } },

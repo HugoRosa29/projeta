@@ -53,13 +53,17 @@ export function PortfolioPage() {
 
   return (
     <>
-      <Hero eyebrow="Portfólio" title="Visão do portfólio" subtitle={area ? `Projetos ativos de ${area.label}, recebidos por ${workspace.name}.` : `Projetos ativos de ${workspace.name} que você pode ver.`} />
+      {/* Faixa baixa com a forma de ver ao lado: o quadro começa logo abaixo, sem rolagem. */}
+      <Hero
+        compact
+        eyebrow="Portfólio"
+        title="Visão do portfólio"
+        subtitle={area ? `Projetos ativos de ${area.label}, recebidos por ${workspace.name}.` : `Projetos ativos de ${workspace.name} que você pode ver.`}
+      >
+        <ViewToggle mode={view} onChange={setView} modes={MODES} />
+      </Hero>
 
       {areas.length > 1 && <AreaTabs areas={areas} current={area?.id ?? null} onPick={setArea} total={everything.length} />}
-
-      <div className="view-bar">
-        <ViewToggle mode={view} onChange={setView} modes={MODES} />
-      </div>
 
       {view === "board" ? (
         all.length ? (

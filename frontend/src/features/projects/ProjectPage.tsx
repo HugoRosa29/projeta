@@ -1,7 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { CornerDownRight, FileText, Link2, History, ImagePlus, Trash2, Users } from "lucide-react";
+import { CornerDownRight, FileBarChart, FileText, Link2, History, ImagePlus, Trash2, UserMinus, UserPlus, Users } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { Link, useParams, useSearchParams } from "react-router";
+import { Avatar } from "../../components/Avatar";
 import { Hero } from "../../components/Hero";
 import { Dialog, Empty, ErrorBox, Loading, useToast } from "../../components/ui";
 import {
@@ -35,7 +36,7 @@ import { PhaseList } from "./PhaseList";
 import { ActiveSprintCard, SprintsView } from "../sprints/SprintsView";
 import { useSprints } from "../sprints/hooks";
 
-interface ProjectData {
+export interface ProjectData {
   project: Project;
   can_write: boolean;
   can_manage: boolean;
@@ -124,13 +125,16 @@ export function ProjectPage() {
         <button className="btn btn-glass btn-sm" onClick={() => setPanel("equipe")} aria-label={`Equipe do projeto: ${d.members.length} pessoa(s)`}>
           <Users size={16} aria-hidden /> Equipe
           <span className="pv-avatars" aria-hidden>
-            {d.members.slice(0, 3).map((m) => <span key={m.id} title={m.name}>{initials(m.name)}</span>)}
+            {d.members.slice(0, 3).map((m) => <Avatar key={m.id} id={m.id} name={m.name} photoVersion={m.photo_version} size={24} />)}
             {d.members.length > 3 && <span>+{d.members.length - 3}</span>}
           </span>
         </button>
         <button className="btn btn-glass btn-sm" onClick={() => setPanel("historico")}>
           <History size={16} aria-hidden /> Histórico
         </button>
+        <Link className="btn btn-glass btn-sm" to={`/projetos/${id}/relatorio`}>
+          <FileBarChart size={16} aria-hidden /> Relatório
+        </Link>
         {workspace.kind === "team" && <ShareButton workspaceId={workspace.id} kind="project" id={id} name={d.project.name} className="btn btn-glass btn-sm" />}
       </Hero>
       {/* Abas e criação rápida dividem a mesma faixa: a altura que sobra fica para o trabalho. */}
@@ -221,33 +225,73 @@ export function ProjectPage() {
   );
 }
 
-function initials(name: string) {
-  const parts = name.trim().split(/\s+/);
-  return ((parts[0]?.[0] ?? "") + (parts.length > 1 ? parts[parts.length - 1][0] : "")).toUpperCase();
-}
-
-function TeamPanel({ d }: { d: ProjectData }) {
+export function TeamPanel({ d }: { d: ProjectData }) {
   const qc = useQueryClient();
-  const { workspace } = useSession();
-  const members = useQuery({ queryKey: ["ws-members", workspace.id], queryFn: () => api.get<{ members: Member[] }>(`/workspaces/${workspace.id}/members`), enabled: d.can_manage });
+  const toast = useToast();
+  const { user, workspaces } = useSession();
+  const wsId = d.project.workspace_id;
+  // A divisão é o espaço do projeto, não o escolhido na barra: só membros dele podem entrar.
+  const wsName = workspaces.find((w) => w.id === wsId)?.name ?? "do espaço";
+  const members = useQuery({ queryKey: ["ws-members", wsId], queryFn: () => api.get<{ members: Member[] }>(`/workspaces/${wsId}/members`), enabled: d.can_manage });
+  const [filter, setFilter] = useState("");
   const addable = (members.data?.members ?? []).filter((m) => !d.members.some((x) => x.id === m.id));
+  const norm = (t: string) => t.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+  const shown = addable.filter((m) => norm(`${m.name} ${m.email}`).includes(norm(filter.trim())));
   const add = useMutation({
-    mutationFn: (user_id: string) => api.post(`/projects/${d.project.id}/members`, { user_id }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["project"] }),
+    mutationFn: (m: Member) => api.post(`/projects/${d.project.id}/members`, { user_id: m.id }).then(() => m),
+    onSuccess: (m) => (qc.invalidateQueries({ queryKey: ["project"] }), toast(`${m.name} entrou no projeto`)),
+    onError: (e) => toast((e as Error).message),
   });
+  const remove = useMutation({
+    mutationFn: (m: Member) => api.del(`/projects/${d.project.id}/members/${m.id}`).then(() => m),
+    onSuccess: (m) => {
+      // As tarefas da pessoa no projeto ficam sem responsável: a lista de tarefas também muda.
+      for (const k of ["project", "tasks"]) qc.invalidateQueries({ queryKey: [k] });
+      toast(`${m.name} saiu da equipe`);
+    },
+    onError: (e) => toast((e as Error).message),
+  });
+  const askRemove = (m: Member) => {
+    const msg = m.id === user.id
+      ? "Sair da equipe deste projeto? Suas tarefas nele ficam sem responsável, e você pode perder o acesso para editar."
+      : `Retirar ${m.name} da equipe? As tarefas de ${m.name} neste projeto ficam sem responsável.`;
+    if (confirm(msg)) remove.mutate(m);
+  };
   return (
     <>
       <ul className="pv-people">
-        {d.members.map((m) => <li key={m.id}><strong>{m.name}</strong> <span className="muted">{m.email}</span></li>)}
+        {d.members.map((m) => (
+          <li key={m.id}>
+            <Avatar id={m.id} name={m.name} photoVersion={m.photo_version} size={36} />
+            <span className="pv-person"><strong>{m.name}</strong> <span className="muted">{m.email}</span></span>
+            {d.can_manage && (
+              <button className="btn btn-ghost btn-sm pv-remove" disabled={remove.isPending} onClick={() => askRemove(m)} aria-label={`Retirar ${m.name} da equipe`} title="Retirar da equipe">
+                <UserMinus size={14} aria-hidden /> Retirar
+              </button>
+            )}
+          </li>
+        ))}
       </ul>
       {d.can_manage && addable.length > 0 && (
-        <div className="field" style={{ marginTop: 14 }}>
-          <label htmlFor="add-member">Adicionar pessoa do espaço</label>
-          <select id="add-member" className="select" value="" onChange={(e) => e.target.value && add.mutate(e.target.value)}>
-            <option value="">Escolher…</option>
-            {addable.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
-          </select>
-        </div>
+        <section className="pv-addable" aria-labelledby="pv-addable-h">
+          <h3 id="pv-addable-h" className="pv-addable-h">Adicionar da {wsName}</h3>
+          {addable.length > 5 && (
+            <input className="input" type="search" placeholder="Buscar por nome ou e-mail" aria-label="Buscar pessoa da divisão" value={filter} onChange={(e) => setFilter(e.target.value)} />
+          )}
+          {shown.length === 0 ? <p className="muted">Ninguém com esse nome. Quem ainda não entrou no PROJETA pode ser convidado pela matrícula abaixo.</p> : (
+            <ul className="pv-people pv-people-add">
+              {shown.map((m) => (
+                <li key={m.id}>
+                  <Avatar id={m.id} name={m.name} photoVersion={m.photo_version} size={36} />
+                  <span className="pv-person"><strong>{m.name}</strong> <span className="muted">{m.email}</span></span>
+                  <button className="btn btn-line btn-sm" disabled={add.isPending} onClick={() => add.mutate(m)} aria-label={`Adicionar ${m.name} ao projeto`}>
+                    <UserPlus size={14} aria-hidden /> Adicionar
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
       )}
       {d.can_manage && <InviteByMatricula projectId={d.project.id} />}
     </>

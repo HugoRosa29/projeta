@@ -19,9 +19,10 @@ export function streakAfter(d: MyOkrs): number {
 
 /**
  * O que cabe a mim nos OKRs. Pendentes primeiro, com um botão que abre a fila inteira de check-ins.
- * Sem KR meu no trimestre, não ocupa espaço (a não ser em `always`).
+ * Sem KR meu no trimestre, não ocupa espaço (a não ser em `always`). Em `brief`, só o chamado
+ * para os pendentes: usado onde o quadro logo abaixo já lista (e destaca) os KRs da pessoa.
  */
-export function MyCheckins({ workspaceId, always = false }: { workspaceId: string; always?: boolean }) {
+export function MyCheckins({ workspaceId, always = false, brief = false }: { workspaceId: string; always?: boolean; brief?: boolean }) {
   const q = useMyOkrs(workspaceId);
   const [queue, setQueue] = useState<KeyResult[] | null>(null);
   if (q.isError) return <ErrorBox error={q.error} onRetry={() => q.refetch()} />;
@@ -29,10 +30,12 @@ export function MyCheckins({ workspaceId, always = false }: { workspaceId: strin
   if (!d || (!d.key_results.length && !always)) return null;
   const pending = d.key_results.filter((k) => k.stale && k.progress < 100);
   const allUpToDate = d.key_results.length > 0 && pending.length === 0;
+  if (brief && !pending.length) return null;
 
   return (
-    <section className={`card okr-mine ${pending.length ? "has-pending" : ""}`} aria-labelledby="okr-mine-title">
-      <div className="card-head">
+    <section className={`card okr-mine ${pending.length ? "has-pending" : ""} ${brief ? "brief" : ""}`} aria-labelledby="okr-mine-title">
+      {/* Em `brief`, a faixa é só o chamado: o título fica para leitores de tela. */}
+      <div className={brief ? "sr-only" : "card-head"}>
         <Target size={20} aria-hidden />
         <h2 id="okr-mine-title">Meus resultados-chave</h2>
         {d.streak_weeks > 0 && (
@@ -51,8 +54,8 @@ export function MyCheckins({ workspaceId, always = false }: { workspaceId: strin
           <button className="btn btn-primary" onClick={() => setQueue(pending)}>Fazer check-in{pending.length > 1 ? ` (${pending.length})` : ""}</button>
         </div>
       )}
-      {allUpToDate && <p className="okr-cheer-line">Tudo em dia nesta semana. Obrigado por manter os números vivos!</p>}
-      {d.key_results.length > 0 && (
+      {allUpToDate && !brief && <p className="okr-cheer-line">Tudo em dia nesta semana. Obrigado por manter os números vivos!</p>}
+      {d.key_results.length > 0 && !brief && (
         <ul className="okr-kr-list">
           {d.key_results.map((k) => <KrRow key={k.id} kr={k} pace={d.pace} onCheckin={(kr) => setQueue([kr])} />)}
         </ul>

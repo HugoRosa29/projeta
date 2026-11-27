@@ -1,7 +1,12 @@
-"""Foto de perfil: cada pessoa troca, lê e remove só a própria (sempre a de `ctx.user_id`)."""
+"""Foto de perfil: cada pessoa troca e remove só a própria (sempre a de `ctx.user_id`).
+
+Ler a de outra pessoa só vale para quem divide algum espaço com ela: é o que a equipe do
+projeto e a lista de quem convidar mostram.
+"""
 
 from ..db import Ctx
-from ..errors import BadRequestError
+from ..errors import BadRequestError, ForbiddenError
+from .access import is_uuid
 
 MAX_BYTES = 1024 * 1024
 
@@ -48,3 +53,19 @@ def get_my_photo(ctx: Ctx) -> dict | None:
 
 def delete_my_photo(ctx: Ctx) -> None:
     ctx.run("DELETE FROM user_photos WHERE user_id=%s", (ctx.user_id,))
+
+
+def get_user_photo(ctx: Ctx, user_id: str) -> dict | None:
+    """Foto de alguém que divide espaço com quem pede. Pessoa inexistente ou fora de todos os
+    espaços de quem pede responde igual (403): não revela se a conta existe."""
+    if user_id == ctx.user_id:
+        return get_my_photo(ctx)
+    if not is_uuid(user_id) or not ctx.one(
+        "SELECT 1 AS x FROM workspace_members a JOIN workspace_members b "
+        "ON b.workspace_id = a.workspace_id WHERE a.user_id = %s AND b.user_id = %s LIMIT 1",
+        (ctx.user_id, user_id),
+    ):
+        raise ForbiddenError()
+    return ctx.one(
+        "SELECT content_type, data, updated_at FROM user_photos WHERE user_id=%s", (user_id,)
+    )

@@ -13,7 +13,8 @@
 .is-overview .hero.hero-compact { min-height: clamp(170px, 24vh, 240px); padding-block: 28px; align-content: center; }
 /* Título e ações empilhados à esquerda, centralizados na altura: a ilustração fica livre à direita, sem botão por cima. */
 .is-overview .hero-compact .hero-copy { grid-template-columns: minmax(0, 1fr); max-width: min(60%, 760px); }
-.is-overview .hero-compact .hero-actions { grid-column: 1; grid-row: auto; margin-top: 18px; justify-content: flex-start; }
+/* As ações ficam numa linha só, mesmo passando dos 60% do texto: a ilustração é decorativa e fica atrás. */
+.is-overview .hero-compact .hero-actions { grid-column: 1; grid-row: auto; margin-top: 18px; justify-content: flex-start; flex-wrap: nowrap; gap: 8px; width: max-content; }
 .is-overview .hero-compact .hero-art { inset: -10% -4% -30% 60%; opacity: 0.55; }
 .hero-compact .hero-copy { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 20px; align-items: center; }
 .hero-compact .eyebrow { grid-column: 1; margin-bottom: 2px; }
@@ -25,6 +26,7 @@
   .hero-compact .hero-copy { grid-template-columns: minmax(0, 1fr); }
   .is-overview .hero-compact .hero-copy { max-width: none; }
   .hero-compact .hero-actions { grid-column: 1; grid-row: auto; margin-top: 10px; justify-content: flex-start; }
+  .is-overview .hero-compact .hero-actions { flex-wrap: wrap; width: auto; }
 }
 
 /* Abas e criação rápida na mesma faixa */
@@ -89,12 +91,21 @@
 .pv-date { display: inline-block; min-width: 72px; font-family: var(--mono); font-size: 0.72rem; color: var(--ink-60); }
 .pv-date.today { color: var(--dourado-deep); font-weight: 700; }
 .pv-avatars { display: inline-flex; margin-left: 2px; }
-.pv-avatars span { display: inline-grid; place-items: center; width: 24px; height: 24px; margin-left: -6px; border-radius: 50%; background: rgba(255, 255, 255, 0.9); color: var(--azul-deep); font-size: 0.625rem; font-weight: 700; border: 1.5px solid var(--hero-b); }
+.pv-avatars .avatar { margin-left: -6px; background: rgba(255, 255, 255, 0.9); color: var(--azul-deep); font-weight: 700; border: 1.5px solid var(--hero-b); }
+.pv-avatars .avatar:first-child { margin-left: 0; }
+.pv-avatars span:not(.avatar) { display: inline-grid; place-items: center; width: 24px; height: 24px; margin-left: -6px; border-radius: 50%; background: rgba(255, 255, 255, 0.9); color: var(--azul-deep); font-size: 0.625rem; font-weight: 700; border: 1.5px solid var(--hero-b); }
 .pv-avatars span:first-child { margin-left: 0; }
 .pv-people, .pv-activity { list-style: none; margin: 0; padding: 0; display: grid; }
 .pv-people li, .pv-activity li { padding: 8px 2px; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
 .pv-people li:last-child, .pv-activity li:last-child { border-bottom: 0; }
-.pv-people li { display: flex; flex-wrap: wrap; gap: 2px 8px; font-size: 0.9rem; }
+.pv-people li { display: flex; align-items: center; gap: 10px; font-size: 0.9rem; }
+.pv-person { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; gap: 2px 8px; }
+.pv-addable { margin-top: 16px; display: grid; gap: 8px; }
+.pv-addable-h { margin: 0; font-size: 0.875rem; }
+.pv-people-add { max-height: 280px; overflow-y: auto; border: 1px solid var(--line); border-radius: 10px; padding: 0 10px; }
+.pv-people-add .btn, .pv-remove { flex: none; }
+.pv-remove { color: var(--ink-60); }
+.pv-remove:hover { color: var(--alerta); }
 .pv-activity li { font-size: 0.875rem; }
 .pv-activity .coord { margin-top: 2px; }
 .pv-facts { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px 16px; margin: 14px 0 0; }

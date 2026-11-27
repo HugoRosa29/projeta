@@ -35,9 +35,6 @@ export function Panorama({ rows, workspaceName, today = isoDate(new Date()) }: P
   const groups = groupTracks(shownRows.map((r) => track(r, today)), groupBy);
 
   const filtered = Boolean(filter.health || filter.field);
-  const subtitle = filtered
-    ? `${plural(shownRows.length, "projeto", "projetos")} de ${fmt(rows.length)} no recorte`
-    : `${plural(rows.length, "projeto ativo", "projetos ativos")} que você pode ver em ${workspaceName}`;
   const toggleHealth = (h: Health) => setFilter((f) => ({ ...f, health: f.health === h ? null : h }));
   // Trocar de campo zera o valor: um valor de "Complexidade" não vale para "PDTI".
   const pickField = (field: string) => setFilter((f) => ({ ...f, field, value: "" }));
@@ -54,10 +51,13 @@ export function Panorama({ rows, workspaceName, today = isoDate(new Date()) }: P
   return (
     <section className="ov pn" aria-labelledby="ov-title">
       <div className="pn-head">
-        <div className="pn-title">
-          <h2 id="ov-title">Panorama</h2>
-          <p className="muted">{subtitle}</p>
-        </div>
+        {/* O cabeçalho da página já diz o que é; aqui o título fica só para leitores de tela. */}
+        <h2 id="ov-title" className="sr-only">Panorama de {workspaceName}</h2>
+        {filtered && (
+          <p className="muted pn-recorte" aria-live="polite">
+            {plural(shownRows.length, "projeto", "projetos")} de {fmt(rows.length)} no recorte
+          </p>
+        )}
         <div className="pn-tools" role="search" aria-label="Filtrar o panorama">
           {index.size > 0 && (
             <select className="select pn-select" aria-label="Filtrar por campo" value={filter.field} onChange={(e) => pickField(e.target.value)}>
@@ -99,7 +99,7 @@ export function Panorama({ rows, workspaceName, today = isoDate(new Date()) }: P
       )}
 
       {groups.length ? (
-        // Como um board: cada grupo é uma tabela com o próprio cabeçalho e uma linha de resumo.
+        // Como um board: cada grupo é uma tabela, com contagem e média no próprio cabeçalho.
         <div className="pn-board-wrap" role="region" aria-label="Quadro dos projetos">
           {groups.map((g) => (
             <Group key={g.key} g={g} open={!closed.has(g.key)} onToggle={() => toggleGroup(g.key)} showHealth={showHealth} today={today} />
@@ -113,12 +113,7 @@ export function Panorama({ rows, workspaceName, today = isoDate(new Date()) }: P
 }
 
 function Group({ g, open, onToggle, showHealth, today }: { g: BoardGroup; open: boolean; onToggle: () => void; showHealth: boolean; today: string }) {
-  const rows = g.tracks.map((t) => t.row);
-  const sum = summarize(rows);
-  const starts = g.tracks.map((t) => t.start ?? t.end).filter((d): d is string => !!d).sort();
-  const ends = g.tracks.map((t) => t.end).filter((d): d is string => !!d).sort();
-  const from = starts[0] ?? null;
-  const to = ends.at(-1) ?? null;
+  const sum = summarize(g.tracks.map((t) => t.row));
   return (
     <section className={`pn-group g-${g.color}`}>
       <table className="pn-board" aria-label={g.label}>
@@ -129,7 +124,10 @@ function Group({ g, open, onToggle, showHealth, today }: { g: BoardGroup; open: 
                 <ChevronDown size={18} aria-hidden className="pn-chev" />
                 <span className="pn-group-l">{g.label}</span>
               </button>
-              <span className="pn-count">{plural(g.tracks.length, "projeto", "projetos")}</span>
+              <span className="pn-count">
+                {plural(g.tracks.length, "projeto", "projetos")} · média {sum.avgProgress}%
+                {sum.overdue > 0 && <span className="pn-bad"> · {plural(sum.overdue, "tarefa atrasada", "tarefas atrasadas")}</span>}
+              </span>
             </th>
             {showHealth && <th scope="col" className="pn-c-health">Situação</th>}
             <th scope="col" className="pn-c-prog">Progresso</th>
@@ -139,31 +137,7 @@ function Group({ g, open, onToggle, showHealth, today }: { g: BoardGroup; open: 
           </tr>
         </thead>
         {open && (
-          <>
-            <tbody>{g.tracks.map((t) => <BoardRow key={t.row.id} t={t} showHealth={showHealth} today={today} />)}</tbody>
-            <tfoot>
-              <tr>
-                <td className="pn-foot-pad" />
-                {showHealth && (
-                  <td className="pn-c-health">
-                    <span className="pn-mix" role="img" aria-label={`Situação: ${(["late", "at_risk", "on_track"] as Health[]).map((h) => `${HEALTH_LABEL[h]} ${sum.health[h]}`).join(", ")}`}>
-                      {(["on_track", "at_risk", "late"] as Health[]).filter((h) => sum.health[h]).map((h) => (
-                        <span key={h} className={`g-${HEALTH_COLOR[h]}`} style={{ flexGrow: sum.health[h] }} />
-                      ))}
-                    </span>
-                  </td>
-                )}
-                <td className="pn-c-prog"><Battery pct={sum.avgProgress} name="Média do grupo" /></td>
-                <td className="pn-c-tl"><Pill start={from} end={to} today={today} /></td>
-                <td className="pn-c-date" />
-                <td className={`pn-c-num${sum.overdue ? " pn-bad" : ""}`}>
-                  <span className="sr-only">Tarefas atrasadas no grupo: </span>
-                  {fmt(sum.overdue)}
-                  <small> soma</small>
-                </td>
-              </tr>
-            </tfoot>
-          </>
+          <tbody>{g.tracks.map((t) => <BoardRow key={t.row.id} t={t} showHealth={showHealth} today={today} />)}</tbody>
         )}
       </table>
     </section>

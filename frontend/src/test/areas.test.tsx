@@ -127,12 +127,27 @@ it("expandir uma área a mostra com detalhes e deixa as outras resumidas ao lado
   expect(screen.getAllByRole("article")).toHaveLength(3);
 });
 
-it("clicar em qualquer ponto do bloco expande a área; expandida, o nome abre o portfólio recortado", async () => {
+it("no mosaico, clicar num projeto o abre direto, sem expandir a área", async () => {
   show();
-  await userEvent.click(await screen.findByTitle("Contratos")); // em cima de um projeto, no mosaico
+  await userEvent.click(await screen.findByRole("link", { name: "Contratos" }));
+  expect(screen.getByTestId("url")).toHaveTextContent("/projetos/Contratos");
+  expect(screen.queryByRole("button", { name: "Recolher DIRAU" })).not.toBeInTheDocument();
+});
+
+it("clicar fora dos projetos expande a área; expandida, o nome abre o portfólio recortado", async () => {
+  show();
+  await userEvent.click(await screen.findByRole("heading", { name: "DIRAU" })); // cabeçalho do bloco, no mosaico
   expect(screen.getByRole("button", { name: "Recolher DIRAU" })).toBeInTheDocument();
   await userEvent.click(screen.getByRole("link", { name: "DIRAU" }));
   expect(screen.getByTestId("url")).toHaveTextContent("/portfolio?area=dirau");
+});
+
+it("expandida, clicar no cabeçalho fora do nome recolhe a área", async () => {
+  show();
+  await userEvent.click(await screen.findByRole("button", { name: "Expandir DISID" }));
+  await userEvent.click(screen.getByText("2 projetos · média 13%", { exact: false }));
+  expect(screen.queryByRole("navigation", { name: "Outras áreas" })).not.toBeInTheDocument();
+  expect(screen.getByTestId("url")).toHaveTextContent(/^\/$/);
 });
 
 it("sem projetos ativos o panorama não aparece", async () => {
@@ -153,8 +168,8 @@ it("portfólio abre no quadro (o antigo panorama da home), recortado pela área 
     </QueryClientProvider>,
   );
   expect(await screen.findByRole("button", { name: /Quadro/ })).toHaveAttribute("aria-pressed", "true");
-  expect(screen.getByText("2 projetos ativos que você pode ver em DISID")).toBeInTheDocument();
-  expect(screen.getByRole("region", { name: "Quadro dos projetos" })).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "Panorama de DISID" })).toBeInTheDocument();
+  expect(within(screen.getByRole("region", { name: "Quadro dos projetos" })).getAllByRole("link")).toHaveLength(2);
 });
 
 it("arranja os projetos na grade que melhor preenche o bloco, sem cartões altos demais", () => {

@@ -231,7 +231,7 @@ function Block({ area, mode, onToggle }: { area: Area; mode: Mode; onToggle: () 
     return (
       <article className="ab-block ab-mini" style={style} aria-labelledby={`ab-${area.id}`}>
         {/* O cartão inteiro é o botão: trocar de área expandida é um clique em qualquer ponto. */}
-        <button type="button" className="ab-mini-btn" style={headVt} onClick={onToggle} data-expand={area.id} aria-label={`Expandir ${area.label}`}>
+        <button type="button" className="ab-mini-btn" style={headVt} onClick={onToggle} data-expand={area.id} aria-label={`Expandir ${area.label}`} title={area.label}>
           <span className="ab-title-row">
             <span className="ab-mini-name" id={`ab-${area.id}`}>
               {area.folder && <FolderOpen size={13} className="ab-folder" aria-label="Pasta" />}
@@ -253,9 +253,8 @@ function Block({ area, mode, onToggle }: { area: Area; mode: Mode; onToggle: () 
   const today = isoDate(new Date());
   const open = mode === "open";
   return (
-    // No mosaico o bloco é visão geral: um clique em qualquer ponto expande a área. Pelo teclado,
-    // o caminho é o botão "Expandir" dentro dele; um segundo foco no bloco seria redundante.
-    // Expandido, os projetos voltam a ser links.
+    // No mosaico, clicar num projeto o abre; clicar no resto do bloco expande a área. Pelo
+    // teclado, o caminho é o botão "Expandir" dentro dele; um segundo foco no bloco seria redundante.
     // eslint-disable-next-line jsx-a11y/click-events-have-key-events
     <article
       className={`ab-block${open ? " ab-open" : " ab-clickable"}`}
@@ -263,7 +262,14 @@ function Block({ area, mode, onToggle }: { area: Area; mode: Mode; onToggle: () 
       aria-labelledby={`ab-${area.id}`}
       onClick={open ? undefined : onToggle}
     >
-      <header className="ab-head" style={headVt}>
+      {/* Expandida, clicar no cabeçalho recolhe (o botão "Recolher" e o Esc seguem valendo para
+          o teclado). O link do nome e o botão mantêm o próprio comportamento. */}
+      {/* eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions */}
+      <header
+        className={`ab-head${open ? " ab-head-collapse" : ""}`}
+        style={headVt}
+        onClick={open ? (e) => !(e.target as HTMLElement).closest("a, button") && onToggle() : undefined}
+      >
         {/* Selos de alerta na linha do nome: com muitas áreas, o cabeçalho cabe em duas linhas. */}
         <div className="ab-title-row">
           <h3 id={`ab-${area.id}`}>
@@ -317,11 +323,11 @@ function ProjectBar({ r, from, detail, today }: { r: PortfolioRow; from: string 
     <li className={`ab-item g-${HEALTH_COLOR[r.health]}`} style={{ viewTransitionName: vt("ab-p", r.id) }}>
       <div className="ab-tile">
         {from && <span className="ab-from">{from}</span>}
-        {detail ? (
-          <Link to={`/projetos/${r.id}`} className="ab-name" title={from ? `${r.name} · ${from}` : r.name}>{r.name}</Link>
-        ) : (
-          <span className="ab-name" title={from ? `${r.name} · ${from}` : r.name}>{r.name}</span>
-        )}
+        {/* O projeto abre direto, também no mosaico: sem parar o clique aqui, o bloco o tomaria
+            como "expandir área" e a navegação viraria dois passos. */}
+        <Link to={`/projetos/${r.id}`} className="ab-name" title={from ? `${r.name} · ${from}` : r.name} onClick={(e) => e.stopPropagation()}>
+          {r.name}
+        </Link>
         <span
           className="ab-bar"
           role="progressbar"

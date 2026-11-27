@@ -73,7 +73,7 @@ export function OkrPage() {
       {q.isError && <ErrorBox error={q.error} onRetry={() => q.refetch()} />}
 
       {/* Quem executa vê primeiro o que é seu; quem gere, só se tiver KR próprio. */}
-      {d && <MyCheckins workspaceId={workspace.id} always={!manage} />}
+      {d && <MyCheckins workspaceId={workspace.id} always={!manage} brief={manage} />}
 
       {d && !d.objectives.length && (
         <Empty
@@ -109,8 +109,8 @@ export function OkrPage() {
       {d && d.received.objectives.length > 0 && (
         <section aria-labelledby="okr-received-title" style={{ marginTop: 24 }}>
           <h2 id="okr-received-title">Recebidos das unidades abaixo</h2>
-          <p className="muted">Objetivos que outras unidades compartilharam com a sua pelo organograma. Só leitura: o check-in é feito no espaço de origem.</p>
-          <OkrBoard d={{ ...d, objectives: d.received.objectives, summary: d.received.summary }} onCheckin={() => undefined} share={share} />
+          <p className="muted">Só leitura: o check-in é feito na unidade de origem.</p>
+          <OkrBoard compact d={{ ...d, objectives: d.received.objectives, summary: d.received.summary }} onCheckin={() => undefined} share={share} />
         </section>
       )}
 

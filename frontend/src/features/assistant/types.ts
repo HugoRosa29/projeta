@@ -49,21 +49,47 @@ export interface StatusNotePayload {
   blockers: string;
 }
 
+/** Plano de ações genéricas: cada passo chama o mesmo serviço da interface. */
+export interface ActionsPayload {
+  steps: { action: string; params: Record<string, unknown> }[];
+}
+export interface ActionField {
+  key: string;
+  label: string;
+  value: unknown;
+  display: string;
+  /** null = só leitura (referências já resolvidas para nomes). */
+  input: "text" | "textarea" | "date" | "number" | "checkbox" | "select" | "multi" | "tags" | null;
+  options?: { value: string; label: string }[];
+}
+export interface ActionStepPreview {
+  action: string;
+  label: string;
+  danger: boolean;
+  fields: ActionField[];
+  /** Edição em lote: as tarefas que vão mudar (seleção congelada na proposta). */
+  targets?: { title: string; due: string | null }[];
+}
+
 export interface Proposal {
   id: string;
-  kind: "create_tasks" | "apply_wbs" | "update_task" | "status_note" | "add_comment";
+  kind: "create_tasks" | "apply_wbs" | "update_task" | "status_note" | "add_comment" | "actions";
   status: "pending" | "confirmed" | "cancelled" | "expired" | "failed";
   expires_at: string;
-  payload: WbsPayload | CreatePayload | UpdatePayload | StatusNotePayload | CommentPayload;
+  payload: WbsPayload | CreatePayload | UpdatePayload | StatusNotePayload | CommentPayload | ActionsPayload;
   preview: {
     count?: number;
     phases?: number;
     milestones?: number;
     titles?: string[];
     can_write?: boolean;
+    steps?: ActionStepPreview[];
+    /** EAP num projeto existente: o nome dele. */
+    project?: string;
+    danger?: boolean;
     tasks?: { task_id: string; title: string; project: string | null; href: string; changes: { field: string; label: string; before: string; after: string }[] }[];
   };
-  result: { created?: { id: string; title: string; href: string }[]; updated?: { id: string; title: string; href: string }[]; project?: { id: string; name: string; href: string } } | null;
+  result: { done?: { label: string; href?: string }[]; created?: { id: string; title: string; href: string }[]; updated?: { id: string; title: string; href: string }[]; project?: { id: string; name: string; href: string } } | null;
 }
 
 export interface ChatMessage {

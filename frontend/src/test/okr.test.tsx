@@ -124,6 +124,20 @@ describe("meus resultados-chave", () => {
     expect(screen.getByRole("button", { name: "Fazer check-in" })).toBeInTheDocument();
   });
 
+  it("no painel de quem gere, só chama para os pendentes, sem repetir a lista do quadro", async () => {
+    vi.spyOn(api, "get").mockResolvedValue(mine);
+    wrap(<MyCheckins workspaceId="w1" brief />);
+    expect(await screen.findByRole("button", { name: "Fazer check-in" })).toBeInTheDocument();
+    expect(screen.queryByText("Satisfação")).not.toBeInTheDocument();
+  });
+
+  it("no painel de quem gere, com tudo em dia, não ocupa espaço", async () => {
+    const get = vi.spyOn(api, "get").mockResolvedValue({ ...mine, key_results: [kr({ stale: false })], pending: 0 });
+    const { container } = wrap(<MyCheckins workspaceId="w1" brief />);
+    await vi.waitFor(() => expect(get).toHaveBeenCalled());
+    expect(container).toBeEmptyDOMElement();
+  });
+
   it("sem KR próprio, não ocupa a home", async () => {
     const get = vi.spyOn(api, "get").mockResolvedValue({ ...mine, key_results: [], pending: 0 });
     const { container } = wrap(<MyCheckins workspaceId="w1" />);
@@ -217,6 +231,32 @@ describe("quadro de OKRs: tela", () => {
     expect(screen.queryByRole("button", { name: "Adicionar KR" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Novo objetivo" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /^Editar/ })).not.toBeInTheDocument();
+  });
+
+  it("só mostra a coluna de custo quando algum KR tem custo", () => {
+    const { unmount } = wrap(<OkrBoard d={board([obj()])} onCheckin={() => {}} />);
+    expect(screen.queryByRole("columnheader", { name: "Custo" })).not.toBeInTheDocument();
+    unmount();
+    wrap(<OkrBoard d={board([obj({ key_results: [kr({ cost: 1500 })] })])} onCheckin={() => {}} />);
+    expect(screen.getByRole("columnheader", { name: "Custo" })).toBeInTheDocument();
+  });
+
+  it("recolhe os filtros secundários e conta os que estão valendo", async () => {
+    const user = userEvent.setup();
+    wrap(<OkrBoard d={board([obj()])} onCheckin={() => {}} />);
+    expect(screen.queryByLabelText("Filtrar por responsável")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /Filtros/ }));
+    await user.selectOptions(screen.getByLabelText("Filtrar por responsável"), "u2");
+    await user.click(screen.getByRole("button", { name: /Filtros/ }));
+    expect(screen.getByRole("button", { name: /Filtros/ })).toHaveTextContent("1");
+    expect(screen.queryByRole("rowheader", { name: /Reduzir prazo/ })).not.toBeInTheDocument();
+  });
+
+  it("em modo compacto, mostra só os grupos", () => {
+    wrap(<OkrBoard compact d={board([obj()])} onCheckin={() => {}} />);
+    expect(screen.getByRole("table", { name: "Atender mais rápido" })).toBeInTheDocument();
+    expect(screen.queryByRole("list", { name: "Resumo do trimestre" })).not.toBeInTheDocument();
+    expect(screen.queryByPlaceholderText(/Buscar/)).not.toBeInTheDocument();
   });
 
   it("objetivo recebido pelo organograma mostra a origem", () => {

@@ -9,7 +9,9 @@ import { attributeValue } from "./work";
  *  recebem cores de categoria em sequência, como os grupos de um board. */
 export const HEALTH_COLOR: Record<Health, string> = { on_track: "green", at_risk: "orange", late: "red" };
 export const PACE_COLOR: Record<Pace, string> = { late: "red", behind: "orange", soon: "blue", ok: "green", none: "gray" };
-export const PALETTE = ["blue", "purple", "teal", "pink", "navy", "olive", "brown"];
+// Grupos sem cor própria (fase, campo livre, objetivo) usam a identidade Terracap: verde, azul e
+// dourado, com os tons profundos e o grafite para quando há mais grupos que cores principais.
+export const PALETTE = ["verde", "azul", "dourado", "verde-deep", "azul-deep", "dourado-deep", "grafite"];
 
 /** Agrupamentos fixos; um campo livre do portfólio entra como "field:<nome>". */
 export type GroupBy = "health" | "pace" | "phase" | `field:${string}`;
