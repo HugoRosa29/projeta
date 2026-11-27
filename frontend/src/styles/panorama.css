@@ -251,7 +251,8 @@
   background: radial-gradient(420px 160px at 85% 0%, rgba(201, 161, 13, 0.3), transparent 70%), linear-gradient(120deg, var(--hero-a), var(--hero-b) 58%, color-mix(in srgb, var(--hero-c) 65%, var(--hero-b)));
   box-shadow: var(--shadow-1); }
 .dash-hello::before { content: ""; position: absolute; inset: 0; z-index: -1; opacity: 0.5; background-image: linear-gradient(rgba(255, 255, 255, 0.07) 1px, transparent 1px), linear-gradient(90deg, rgba(255, 255, 255, 0.07) 1px, transparent 1px); background-size: 28px 28px; -webkit-mask-image: linear-gradient(90deg, transparent 30%, #000); mask-image: linear-gradient(90deg, transparent 30%, #000); }
-.dash-avatar { flex: none; display: grid; place-items: center; width: 44px; height: 44px; border-radius: 50%; background: rgba(255, 255, 255, 0.14); box-shadow: inset 0 0 0 2px #f0d36a; font: 700 0.9375rem/1 var(--display); letter-spacing: 0.02em; }
+.dash-avatar img { width: 100%; height: 100%; object-fit: cover; }
+.dash-avatar { flex: none; display: grid; place-items: center; width: 44px; height: 44px; border-radius: 50%; overflow: hidden; background: rgba(255, 255, 255, 0.14); box-sizing: border-box; border: 2px solid #f0d36a; font: 700 0.9375rem/1 var(--display); letter-spacing: 0.02em; }
 .dash-hello-text { min-width: 0; flex: 1; }
 .dash-hello h1 { margin: 0; font-size: 1.375rem; line-height: 1.2; color: #fff; }
 .dash-date { margin: 2px 0 0; font-size: 0.8125rem; color: rgba(255, 255, 255, 0.82); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { PanelRightClose, PanelRightOpen } from "lucide-react";
 import { useState } from "react";
 import { Link } from "react-router";
+import { userPhotoUrl } from "../../components/Avatar";
 import { Empty, ErrorBox, Loading } from "../../components/ui";
 import type { Task } from "../../domain/types";
 import { api } from "../../services/api";
@@ -9,6 +10,7 @@ import { useSession } from "../../app/session";
 import { QuickAdd, TaskDialog, TaskList } from "../tasks/TaskParts";
 import { isLead } from "../../domain/okr";
 import { MyCheckins, OkrPulse } from "../okrs/OkrCards";
+import type { Profile } from "../profile/ProfilePage";
 import { AreaBlocks } from "./AreaBlocks";
 
 interface TodayData {
@@ -67,6 +69,19 @@ export function initials(name: string): string {
   return (parts[0][0] + last).toUpperCase();
 }
 
+/** Foto da pessoa na saudação, ou as iniciais sem foto (ou se ela não carregar). Mesma consulta
+ *  do menu de perfil: o cache é compartilhado e trocar a foto atualiza os dois lugares. */
+function HelloAvatar({ id, name }: { id: string; name: string }) {
+  const profile = useQuery({ queryKey: ["me", "profile"], queryFn: () => api.get<Profile>("/me/profile"), staleTime: 60_000 });
+  const version = profile.data?.photo_version;
+  const [failed, setFailed] = useState<string | null>(null);
+  return (
+    <span className="dash-avatar" aria-hidden>
+      {version && failed !== version ? <img src={userPhotoUrl(id, version)} alt="" onError={() => setFailed(version)} /> : initials(name)}
+    </span>
+  );
+}
+
 /** Home em formato de painel: no desktop cabe numa tela só. O panorama em blocos por área ocupa
  *  a coluna principal e rola por dentro (o quadro detalhado fica no portfólio); a coluna
  *  lateral reúne OKRs e o trabalho da própria pessoa. */
@@ -84,7 +99,7 @@ export function TodayPage() {
   return (
     <div className={`dash${sideHidden ? " dash-wide" : ""}`}>
       <header className="dash-hello">
-        <span className="dash-avatar" aria-hidden>{initials(user.name)}</span>
+        <HelloAvatar id={user.id} name={user.name} />
         <div className="dash-hello-text">
           <h1>{greeting(new Date().getHours())}, {user.name.split(" ")[0]}</h1>
           {date && <p className="dash-date">{date} · {workspace.name}</p>}

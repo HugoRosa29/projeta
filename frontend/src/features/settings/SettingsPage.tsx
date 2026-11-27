@@ -1,5 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState, type FormEvent } from "react";
+import { Building2, Copy, Download, Layers, Network, Plus, Search, ShieldCheck, SlidersHorizontal, Trash2, UserPlus, Users, type LucideIcon } from "lucide-react";
+import { useState, type FormEvent, type ReactNode } from "react";
+import { useSearchParams } from "react-router";
+import { Avatar } from "../../components/Avatar";
 import { Empty, ErrorBox, Loading, useToast } from "../../components/ui";
 import { ROLE_LABEL, can, type Member, type Permission, type Role, type Workspace } from "../../domain/types";
 import { api } from "../../services/api";
@@ -15,33 +18,197 @@ export function invitableRoles(mine: Role): Role[] {
   return mine === "admin" ? ROLES : ROLES.filter((r) => r !== "admin" && RANK[r] <= RANK[mine]);
 }
 
+type SectionId = "preferencias" | "espaco" | "pessoas" | "permissoes" | "organizacao" | "espacos";
+interface SectionDef { id: SectionId; label: string; hint: string; icon: LucideIcon }
+
+/** Uma seção por vez, escolhida no menu ao lado (no celular, em abas roláveis no topo). A seção
+ *  aberta fica na URL (?secao=) para o link e o "voltar" do navegador levarem ao mesmo lugar. */
 export function SettingsPage() {
-  const { workspace, workspaces, user, setWorkspaceId, refresh } = useSession();
+  const { workspace, workspaces, setWorkspaceId, refresh } = useSession();
   const qc = useQueryClient();
   const toast = useToast();
   const isAdmin = workspace.role === "admin";
-  const canInvite = workspace.kind === "team" && can(workspace, "workspace.invite");
+  const isTeam = workspace.kind === "team";
+  const canInvite = isTeam && can(workspace, "workspace.invite");
   const inviteRoles = invitableRoles(workspace.role);
   const done = (msg: string) => () => (refresh(), qc.invalidateQueries({ queryKey: ["ws"] }), toast(msg));
   const fail = (e: unknown) => toast((e as Error).message);
 
+  const sections: SectionDef[] = [
+    { id: "preferencias", label: "Preferências", hint: "Fuso horário e avisos", icon: SlidersHorizontal },
+    { id: "espaco", label: "Este espaço", hint: "Nome, fuso e exportação", icon: Building2 },
+    { id: "pessoas", label: "Pessoas", hint: isTeam ? "Membros e convites" : "Quem está no espaço", icon: Users },
+    ...(isTeam
+      ? ([
+          { id: "permissoes", label: "Permissões", hint: "O que cada perfil pode fazer", icon: ShieldCheck },
+          { id: "organizacao", label: "Organização", hint: "Organograma e compartilhamento", icon: Network },
+        ] as SectionDef[])
+      : []),
+    { id: "espacos", label: "Seus espaços", hint: "Trocar, criar e importar", icon: Layers },
+  ];
+  const [sp, setSp] = useSearchParams();
+  const asked = sp.get("secao");
+  const current = sections.find((s) => s.id === asked) ?? sections[0];
+  const go = (id: SectionId) => setSp(id === sections[0].id ? {} : { secao: id });
+
+  return (
+    <>
+      <div className="page-head">
+        <div>
+          <p className="eyebrow">Configurações</p>
+          <h1>{current.label}</h1>
+          <p className="muted" style={{ marginTop: 4 }}>
+            Espaço atual: <strong>{workspace.name}</strong> · {workspace.kind === "personal" ? "Pessoal" : "Equipe"} · você é {ROLE_LABEL[workspace.role]}
+          </p>
+        </div>
+      </div>
+
+      <div className="set-layout">
+        <nav className="set-nav" aria-label="Seções das configurações">
+          {sections.map((s) => (
+            <button key={s.id} type="button" className="set-nav-item" aria-current={s.id === current.id ? "page" : undefined} onClick={() => go(s.id)}>
+              <s.icon size={18} aria-hidden />
+              <span>
+                <span className="set-nav-label">{s.label}</span>
+                <span className="set-nav-hint">{s.hint}</span>
+              </span>
+            </button>
+          ))}
+        </nav>
+
+        <div className="set-body">
+          {current.id === "preferencias" && <PreferencesSection onDone={done} onError={fail} />}
+          {current.id === "espaco" && <WorkspaceSection isAdmin={isAdmin} onDone={done} onError={fail} />}
+          {current.id === "pessoas" && <PeopleSection isAdmin={isAdmin} canInvite={canInvite} inviteRoles={inviteRoles} onDone={done} onError={fail} />}
+          {current.id === "permissoes" && <PermissionsMatrix workspaceId={workspace.id} editable={isAdmin} onSaved={done("Permissões atualizadas")} onError={fail} />}
+          {current.id === "organizacao" && <OrgSection workspaceId={workspace.id} onError={fail} onDone={(m) => toast(m)} />}
+          {current.id === "espacos" && (
+            <SpacesSection
+              current={workspace}
+              workspaces={workspaces}
+              open={setWorkspaceId}
+              onDone={done}
+              onError={fail}
+            />
+          )}
+        </div>
+      </div>
+    </>
+  );
+}
+
+type Done = (msg: string) => () => void;
+type Fail = (e: unknown) => void;
+
+function SectionHead({ title, children }: { title: string; children?: ReactNode }) {
+  return (
+    <div className="set-head">
+      <h2>{title}</h2>
+      {children && <p className="muted">{children}</p>}
+    </div>
+  );
+}
+
+function PreferencesSection({ onDone, onError }: { onDone: Done; onError: Fail }) {
+  const { workspace, user } = useSession();
+  const prefs = useMutation({ mutationFn: (b: object) => api.patch(`/workspaces/${workspace.id}/me`, b), onSuccess: onDone("Preferência salva"), onError });
+  const tz = useMutation({ mutationFn: (timezone: string) => api.patch("/me/timezone", { timezone }), onSuccess: onDone("Fuso atualizado"), onError });
+  return (
+    <>
+      <section className="card">
+        <SectionHead title="Fuso horário">Define o que conta como “hoje” e quando chegam os lembretes. Vale para todos os seus espaços.</SectionHead>
+        <div className="field" style={{ maxWidth: 360, marginBottom: 0 }}>
+          <label htmlFor="tz">Seu fuso horário</label>
+          <select id="tz" className="select" value={user.timezone} onChange={(e) => tz.mutate(e.target.value)}>
+            {[...new Set([user.timezone, ...TZS])].map((z) => <option key={z}>{z}</option>)}
+          </select>
+        </div>
+      </section>
+      <section className="card">
+        <SectionHead title="Notificações">Só para o espaço “{workspace.name}”. Troque de espaço para ajustar os outros.</SectionHead>
+        <div className="set-toggles">
+          <label className="set-toggle">
+            <input type="checkbox" className="check" checked={workspace.notify_inapp} onChange={(e) => prefs.mutate({ notify_inapp: e.target.checked })} />
+            <span className="set-toggle-text">Avisos dentro do app</span>
+          </label>
+          <label className="set-toggle">
+            <input type="checkbox" className="check" checked={workspace.notify_email} onChange={(e) => prefs.mutate({ notify_email: e.target.checked })} />
+            <span className="set-toggle-text">Resumo por e-mail <span className="badge warn">envio ainda não configurado</span></span>
+          </label>
+        </div>
+      </section>
+    </>
+  );
+}
+
+function WorkspaceSection({ isAdmin, onDone, onError }: { isAdmin: boolean; onDone: Done; onError: Fail }) {
+  const { workspace } = useSession();
+  const toast = useToast();
+  const [wsName, setWsName] = useState(workspace.name);
+  const patchWs = useMutation({ mutationFn: (b: object) => api.patch(`/workspaces/${workspace.id}`, b), onSuccess: onDone("Espaço atualizado"), onError });
+  const [exporting, setExporting] = useState(false);
+  const exportWs = () => {
+    setExporting(true);
+    api
+      .download(`/workspaces/${workspace.id}/export`, exportFilename(workspace.name))
+      .then(() => toast("Exportação baixada"), onError)
+      .finally(() => setExporting(false));
+  };
+
+  if (!isAdmin) {
+    return (
+      <section className="card">
+        <SectionHead title="Dados do espaço">Só o Gestor do espaço altera estes dados.</SectionHead>
+        <dl className="set-dl">
+          <dt>Nome</dt><dd>{workspace.name}</dd>
+          <dt>Tipo</dt><dd>{workspace.kind === "personal" ? "Pessoal" : "Equipe"}</dd>
+          <dt>Fuso do espaço</dt><dd>{workspace.timezone}</dd>
+          <dt>Seu perfil</dt><dd>{ROLE_LABEL[workspace.role]}</dd>
+        </dl>
+      </section>
+    );
+  }
+  return (
+    <>
+      <section className="card">
+        <SectionHead title="Dados do espaço">O nome aparece no seletor de espaços para todo mundo que participa.</SectionHead>
+        <form className="field" style={{ maxWidth: 520 }} onSubmit={(e: FormEvent) => (e.preventDefault(), patchWs.mutate({ name: wsName }))}>
+          <label htmlFor="ws-name">Nome do espaço</label>
+          <div className="row">
+            <input id="ws-name" className="input grow" value={wsName} onChange={(e) => setWsName(e.target.value)} />
+            <button className="btn btn-line" disabled={wsName.trim().length < 2 || wsName === workspace.name || patchWs.isPending}>Salvar nome</button>
+          </div>
+        </form>
+        <div className="field" style={{ maxWidth: 360, marginBottom: 0 }}>
+          <label htmlFor="ws-tz">Fuso horário do espaço</label>
+          <select id="ws-tz" className="select" value={workspace.timezone} onChange={(e) => patchWs.mutate({ timezone: e.target.value })}>
+            {[...new Set([workspace.timezone, ...TZS])].map((z) => <option key={z}>{z}</option>)}
+          </select>
+          <span className="muted set-note">Salvo assim que você troca.</span>
+        </div>
+      </section>
+      <section className="card">
+        <SectionHead title="Exportar">Baixa um arquivo com projetos, tarefas, comentários, histórico e pessoas, para importar em outra instalação.</SectionHead>
+        <button className="btn btn-line" disabled={exporting} onClick={exportWs}>
+          <Download size={16} aria-hidden /> {exporting ? "Exportando…" : "Exportar espaço"}
+        </button>
+      </section>
+    </>
+  );
+}
+
+function PeopleSection({ isAdmin, canInvite, inviteRoles, onDone, onError }: { isAdmin: boolean; canInvite: boolean; inviteRoles: Role[]; onDone: Done; onError: Fail }) {
+  const { workspace, user } = useSession();
+  const toast = useToast();
+  const [filter, setFilter] = useState("");
   const members = useQuery({ queryKey: ["ws", "members", workspace.id], queryFn: () => api.get<{ members: Member[] }>(`/workspaces/${workspace.id}/members`) });
   const invites = useQuery({
     queryKey: ["ws", "invites", workspace.id],
     queryFn: () => api.get<{ invitations: { id: string; email: string; role: Role; expires_at: string }[] }>(`/workspaces/${workspace.id}/invitations`),
     enabled: canInvite,
   });
-
-  const [teamName, setTeamName] = useState("");
-  const createTeam = useMutation({
-    mutationFn: () => api.post<{ id: string }>("/workspaces", { name: teamName }),
-    onSuccess: (w) => (setTeamName(""), setWorkspaceId(w.id), done("Espaço criado")()),
-    onError: fail,
-  });
-  const [wsName, setWsName] = useState(workspace.name);
-  const patchWs = useMutation({ mutationFn: (b: object) => api.patch(`/workspaces/${workspace.id}`, b), onSuccess: done("Espaço atualizado"), onError: fail });
-  const setRole = useMutation({ mutationFn: (v: { id: string; role: Role }) => api.patch(`/workspaces/${workspace.id}/members/${v.id}`, { role: v.role }), onSuccess: done("Papel atualizado"), onError: fail });
-  const remove = useMutation({ mutationFn: (id: string) => api.del(`/workspaces/${workspace.id}/members/${id}`), onSuccess: done("Pessoa removida"), onError: fail });
+  const setRole = useMutation({ mutationFn: (v: { id: string; role: Role }) => api.patch(`/workspaces/${workspace.id}/members/${v.id}`, { role: v.role }), onSuccess: onDone("Papel atualizado"), onError });
+  const remove = useMutation({ mutationFn: (id: string) => api.del(`/workspaces/${workspace.id}/members/${id}`), onSuccess: onDone("Pessoa removida"), onError });
   const [invEmail, setInvEmail] = useState("");
   const [invRole, setInvRole] = useState<Role>(inviteRoles.includes("member") ? "member" : inviteRoles[0]);
   const [link, setLink] = useState<string | null>(null);
@@ -50,138 +217,132 @@ export function SettingsPage() {
     onSuccess: (r) => {
       setLink(`${window.location.origin}/convite/${r.token}`);
       setInvEmail("");
-      done("Convite criado")();
+      onDone("Convite criado")();
     },
-    onError: fail,
+    onError,
   });
-  const revoke = useMutation({ mutationFn: (id: string) => api.del(`/workspaces/${workspace.id}/invitations/${id}`), onSuccess: done("Convite revogado"), onError: fail });
-  const prefs = useMutation({ mutationFn: (b: object) => api.patch(`/workspaces/${workspace.id}/me`, b), onSuccess: done("Preferência salva"), onError: fail });
-  const [exporting, setExporting] = useState(false);
-  const exportWs = () => {
-    setExporting(true);
-    api
-      .download(`/workspaces/${workspace.id}/export`, exportFilename(workspace.name))
-      .then(() => toast("Exportação baixada"), fail)
-      .finally(() => setExporting(false));
-  };
-  const tz = useMutation({ mutationFn: (timezone: string) => api.patch("/me/timezone", { timezone }), onSuccess: done("Fuso atualizado"), onError: fail });
+  const revoke = useMutation({ mutationFn: (id: string) => api.del(`/workspaces/${workspace.id}/invitations/${id}`), onSuccess: onDone("Convite revogado"), onError });
+
+  const all = members.data?.members ?? [];
+  const f = filter.trim().toLowerCase();
+  const list = f ? all.filter((m) => `${m.name} ${m.email}`.toLowerCase().includes(f)) : all;
+  const pending = invites.data?.invitations ?? [];
 
   return (
     <>
-      <div className="page-head">
-        <div>
-          <p className="eyebrow">Configurações</p>
-          <h1>Configurações</h1>
-        </div>
-      </div>
-
-      <section className="card">
-        <h2>Espaços</h2>
-        <ul className="task-list" style={{ margin: "12px 0" }}>
-          {workspaces.map((w) => (
-            <li key={w.id} className="task-row">
-              <span style={{ flex: 1 }}>{w.name} <span className="badge">{w.kind === "personal" ? "Pessoal" : "Equipe"}</span> <span className="muted">{ROLE_LABEL[w.role]}</span></span>
-              {w.id !== workspace.id ? <button className="btn btn-line btn-sm" onClick={() => setWorkspaceId(w.id)}>Abrir</button> : <span className="badge ok">Atual</span>}
-            </li>
-          ))}
-        </ul>
-        <ImportWorkspace targets={workspaces.filter((w) => w.role === "admin")} onDone={(id) => (setWorkspaceId(id), done("Espaço importado")())} onError={fail} />
-        <form className="row" onSubmit={(e: FormEvent) => (e.preventDefault(), createTeam.mutate())}>
-          <label className="sr-only" htmlFor="team-name">Nome do novo espaço de equipe</label>
-          <input id="team-name" className="input grow" placeholder="Novo espaço de equipe…" value={teamName} onChange={(e) => setTeamName(e.target.value)} />
-          <button className="btn btn-primary" disabled={teamName.trim().length < 2}>Criar espaço de equipe</button>
-        </form>
-      </section>
-
-      <section className="card">
-        <h2>Preferências</h2>
-        <div className="row" style={{ marginTop: 12 }}>
-          <div className="field grow">
-            <label htmlFor="tz">Seu fuso horário (datas de “hoje” e lembretes)</label>
-            <select id="tz" className="select" value={user.timezone} onChange={(e) => tz.mutate(e.target.value)}>
-              {[...new Set([user.timezone, ...TZS])].map((z) => <option key={z}>{z}</option>)}
-            </select>
-          </div>
-        </div>
-        <fieldset style={{ border: 0, padding: 0, margin: 0 }}>
-          <legend className="label" style={{ fontWeight: 600, fontSize: "0.8125rem", marginBottom: 6 }}>Notificações neste espaço</legend>
-          <label className="row" style={{ gap: 8 }}><input type="checkbox" className="check" checked={workspace.notify_inapp} onChange={(e) => prefs.mutate({ notify_inapp: e.target.checked })} /> Avisos dentro do app</label>
-          <label className="row" style={{ gap: 8, marginTop: 6 }}><input type="checkbox" className="check" checked={workspace.notify_email} onChange={(e) => prefs.mutate({ notify_email: e.target.checked })} /> Resumo por e-mail <span className="badge warn">envio ainda não configurado</span></label>
-        </fieldset>
-      </section>
-
-      {isAdmin && (
+      {canInvite && (
         <section className="card">
-          <h2>Espaço “{workspace.name}”</h2>
-          <form className="row" style={{ marginTop: 12 }} onSubmit={(e: FormEvent) => (e.preventDefault(), patchWs.mutate({ name: wsName }))}>
-            <label className="sr-only" htmlFor="ws-name">Nome do espaço</label>
-            <input id="ws-name" className="input grow" value={wsName} onChange={(e) => setWsName(e.target.value)} />
-            <select className="select grow" aria-label="Fuso horário do espaço" value={workspace.timezone} onChange={(e) => patchWs.mutate({ timezone: e.target.value })}>
-              {[...new Set([workspace.timezone, ...TZS])].map((z) => <option key={z}>{z}</option>)}
+          <SectionHead title="Convidar pessoa">A pessoa recebe um link que vale por 7 dias e só funciona para o e-mail convidado.</SectionHead>
+          <form className="row" onSubmit={(e: FormEvent) => (e.preventDefault(), invite.mutate())}>
+            <label className="sr-only" htmlFor="inv-email">E-mail</label>
+            <input id="inv-email" className="input grow" type="email" required placeholder="email@pessoa.com" value={invEmail} onChange={(e) => setInvEmail(e.target.value)} />
+            <select className="select" style={{ width: "auto" }} aria-label="Papel do convidado" value={invRole} onChange={(e) => setInvRole(e.target.value as Role)}>
+              {inviteRoles.map((r) => <option key={r} value={r}>{ROLE_LABEL[r]}</option>)}
             </select>
-            <button className="btn btn-line">Salvar nome</button>
+            <button className="btn btn-primary" disabled={invite.isPending}><UserPlus size={16} aria-hidden /> Convidar</button>
           </form>
-          <div className="row" style={{ marginTop: 12, gap: 8 }}>
-            <button className="btn btn-line" disabled={exporting} onClick={exportWs}>{exporting ? "Exportando…" : "Exportar espaço"}</button>
-            <span className="muted">Baixa um arquivo com projetos, tarefas, comentários, histórico e pessoas, para importar em outra instalação.</span>
-          </div>
+          {link && (
+            <div className="set-link" role="status">
+              <span>Envie este link à pessoa:</span>
+              <code>{link}</code>
+              <button className="btn btn-line btn-sm" onClick={() => navigator.clipboard?.writeText(link).then(() => toast("Link copiado"))}><Copy size={14} aria-hidden /> Copiar</button>
+            </div>
+          )}
+          {pending.length > 0 && (
+            <>
+              <h3 className="set-sub">Convites pendentes <span className="badge">{pending.length}</span></h3>
+              <ul className="set-list">
+                {pending.map((i) => (
+                  <li key={i.id} className="set-item">
+                    <span className="set-item-main"><strong>{i.email}</strong><span className="muted">expira em {new Date(i.expires_at).toLocaleDateString("pt-BR")}</span></span>
+                    <span className="badge">{ROLE_LABEL[i.role]}</span>
+                    <button className="btn btn-ghost btn-sm" onClick={() => revoke.mutate(i.id)}>Revogar</button>
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
+          {invites.data && pending.length === 0 && <p className="muted set-note" style={{ marginTop: 10 }}>Sem convites pendentes.</p>}
         </section>
       )}
 
       <section className="card">
-        <h2>Equipe</h2>
+        <div className="set-head set-head-row">
+          <div>
+            <h2>Membros {members.data && <span className="badge">{all.length}</span>}</h2>
+            <p className="muted">{isAdmin ? "Mude o perfil de alguém no seletor ao lado do nome." : "Só o Gestor altera perfis e remove pessoas."}</p>
+          </div>
+          {all.length > 6 && (
+            <label className="orgc-search set-filter">
+              <Search size={15} aria-hidden />
+              <span className="sr-only">Filtrar membros</span>
+              <input className="input" type="search" placeholder="Filtrar por nome ou e-mail…" value={filter} onChange={(e) => setFilter(e.target.value)} />
+            </label>
+          )}
+        </div>
         {members.isLoading && <Loading />}
         {members.isError && <ErrorBox error={members.error} onRetry={() => members.refetch()} />}
-        <ul className="task-list" style={{ marginTop: 12 }}>
-          {members.data?.members.map((m) => (
-            <li key={m.id} className="task-row">
-              <span style={{ flex: 1, minWidth: 0 }}>{m.name} <span className="muted">{m.email}</span></span>
+        {members.data && list.length === 0 && <Empty title="Ninguém com esse nome" />}
+        <ul className="set-list">
+          {list.map((m) => (
+            <li key={m.id} className="set-item">
+              <Avatar id={m.id} name={m.name} photoVersion={m.photo_version} size={32} />
+              <span className="set-item-main">
+                <strong>{m.name}{m.id === user.id && <span className="muted"> (você)</span>}</strong>
+                <span className="muted">{m.email}</span>
+              </span>
               {isAdmin ? (
                 <>
                   <select className="select" style={{ width: "auto" }} aria-label={`Papel de ${m.name}`} value={m.role} onChange={(e) => setRole.mutate({ id: m.id, role: e.target.value as Role })}>
                     {ROLES.map((r) => <option key={r} value={r}>{ROLE_LABEL[r]}</option>)}
                   </select>
-                  {m.id !== user.id && <button className="btn btn-danger btn-sm" onClick={() => confirm(`Remover ${m.name} do espaço?`) && remove.mutate(m.id)}>Remover</button>}
+                  {m.id !== user.id ? (
+                    <button className="btn btn-ghost btn-sm set-danger" aria-label={`Remover ${m.name}`} title="Remover do espaço" onClick={() => confirm(`Remover ${m.name} do espaço?`) && remove.mutate(m.id)}>
+                      <Trash2 size={16} aria-hidden />
+                    </button>
+                  ) : <span className="set-item-spacer" aria-hidden />}
                 </>
               ) : <span className="badge">{ROLE_LABEL[m.role]}</span>}
             </li>
           ))}
         </ul>
       </section>
+    </>
+  );
+}
 
-      {workspace.kind === "team" && <OrgSection workspaceId={workspace.id} onError={fail} onDone={(m) => toast(m)} />}
-
-      {workspace.kind === "team" && <PermissionsMatrix workspaceId={workspace.id} editable={isAdmin} onSaved={done("Permissões atualizadas")} onError={fail} />}
-
-      {canInvite && (
-        <section className="card">
-          <h2>Convites</h2>
-          <form className="row" style={{ marginTop: 12 }} onSubmit={(e: FormEvent) => (e.preventDefault(), invite.mutate())}>
-            <label className="sr-only" htmlFor="inv-email">E-mail</label>
-            <input id="inv-email" className="input grow" type="email" required placeholder="email@pessoa.com" value={invEmail} onChange={(e) => setInvEmail(e.target.value)} />
-            <select className="select grow" aria-label="Papel do convidado" value={invRole} onChange={(e) => setInvRole(e.target.value as Role)}>
-              {inviteRoles.map((r) => <option key={r} value={r}>{ROLE_LABEL[r]}</option>)}
-            </select>
-            <button className="btn btn-primary">Convidar</button>
-          </form>
-          {link && (
-            <p className="card" style={{ marginTop: 12, overflowWrap: "anywhere" }} role="status">
-              Envie este link à pessoa (vale por 7 dias e só para o e-mail convidado):<br /><strong>{link}</strong>{" "}
-              <button className="btn btn-ghost" onClick={() => navigator.clipboard?.writeText(link).then(() => toast("Link copiado"))}>Copiar</button>
-            </p>
-          )}
-          {invites.data && (invites.data.invitations.length === 0 ? <Empty title="Sem convites pendentes" /> : (
-            <ul className="task-list" style={{ marginTop: 12 }}>
-              {invites.data.invitations.map((i) => (
-                <li key={i.id} className="task-row">
-                  <span style={{ flex: 1 }}>{i.email} <span className="badge">{ROLE_LABEL[i.role]}</span></span>
-                  <button className="btn btn-ghost" onClick={() => revoke.mutate(i.id)}>Revogar</button>
-                </li>
-              ))}
-            </ul>
+function SpacesSection({ current, workspaces, open, onDone, onError }: { current: Workspace; workspaces: Workspace[]; open: (id: string) => void; onDone: Done; onError: Fail }) {
+  const [teamName, setTeamName] = useState("");
+  const createTeam = useMutation({
+    mutationFn: () => api.post<{ id: string }>("/workspaces", { name: teamName }),
+    onSuccess: (w) => (setTeamName(""), open(w.id), onDone("Espaço criado")()),
+    onError,
+  });
+  return (
+    <>
+      <section className="card">
+        <SectionHead title="Espaços em que você participa">Cada espaço tem seus projetos, pessoas e permissões. As outras seções desta página valem para o espaço atual.</SectionHead>
+        <ul className="set-list">
+          {workspaces.map((w) => (
+            <li key={w.id} className={`set-item${w.id === current.id ? " is-current" : ""}`}>
+              <span className="set-item-main">
+                <strong>{w.name}</strong>
+                <span className="muted">{w.kind === "personal" ? "Pessoal" : "Equipe"} · {ROLE_LABEL[w.role]}</span>
+              </span>
+              {w.id !== current.id ? <button className="btn btn-line btn-sm" onClick={() => open(w.id)}>Abrir</button> : <span className="badge ok">Atual</span>}
+            </li>
           ))}
-        </section>
-      )}
+        </ul>
+      </section>
+      <section className="card">
+        <SectionHead title="Criar espaço de equipe">Você vira Gestor do novo espaço e pode convidar pessoas em seguida.</SectionHead>
+        <form className="row" onSubmit={(e: FormEvent) => (e.preventDefault(), createTeam.mutate())}>
+          <label className="sr-only" htmlFor="team-name">Nome do novo espaço de equipe</label>
+          <input id="team-name" className="input grow" placeholder="Nome do espaço…" value={teamName} onChange={(e) => setTeamName(e.target.value)} />
+          <button className="btn btn-primary" disabled={teamName.trim().length < 2 || createTeam.isPending}><Plus size={16} aria-hidden /> Criar espaço</button>
+        </form>
+      </section>
+      <ImportWorkspace targets={workspaces.filter((w) => w.role === "admin")} onDone={(id) => (open(id), onDone("Espaço importado")())} onError={onError} />
     </>
   );
 }
@@ -281,8 +442,8 @@ export function ImportWorkspace({ targets, onDone, onError }: { targets: Workspa
     onError,
   });
   return (
-    <form className="card" style={{ margin: "12px 0" }} onSubmit={(e: FormEvent) => (e.preventDefault(), run.mutate())}>
-      <h3 style={{ margin: 0 }}>Importar espaço</h3>
+    <form className="card" onSubmit={(e: FormEvent) => (e.preventDefault(), run.mutate())}>
+      <h2>Importar espaço</h2>
       <p className="muted" style={{ marginTop: 4 }}>Use o arquivo gerado em “Exportar espaço” em outra instalação. Nada do destino é sobrescrito: projetos e tarefas entram como novos.</p>
       <div className="row" style={{ marginTop: 8 }}>
         <label className="sr-only" htmlFor="imp-file">Arquivo de exportação</label>

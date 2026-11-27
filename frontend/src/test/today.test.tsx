@@ -13,10 +13,11 @@ const task = (id: string, title: string): Task => ({ ...base, id, title });
 
 afterEach(() => vi.restoreAllMocks());
 
-function show(role: string) {
+function show(role: string, photo: string | null = null) {
   vi.spyOn(api, "get").mockImplementation(async (path: string) => {
     if (path === "/today") return { today: "2026-11-24", overdue: [], due_today: [task("a", "Assinar contrato")], upcoming: [], priorities: [], inbox: [task("b", "Ler relatório")] };
     if (path === "/portfolio") return { projects: [] };
+    if (path === "/me/profile") return { photo_version: photo };
     return { key_results: [], objectives: [], summary: { objectives: 0 }, can_manage: false };
   });
   const me = { user: { id: "u1", name: "Ana" } as User, workspaces: [{ id: "w1", name: "Equipe", kind: "team", role } as Workspace] };
@@ -59,4 +60,16 @@ it("a coluna de OKRs e tarefas pode ser escondida, e a escolha fica no navegador
   expect(localStorage.getItem("projeta-home-side")).toBe("hidden");
   await userEvent.click(screen.getByRole("button", { name: /Mostrar OKRs e tarefas/ }));
   expect(screen.getByRole("complementary", { name: "Seu trabalho" })).toBeVisible();
+});
+
+it("a saudação mostra a foto da pessoa e, sem foto, as iniciais", async () => {
+  show("member", "2026-11-01T10:00:00Z");
+  const hello = await screen.findByRole("banner");
+  await vi.waitFor(() => expect(hello.querySelector(".dash-avatar img")).toHaveAttribute("src", expect.stringContaining("/users/u1/photo")));
+});
+
+it("sem foto, a saudação mostra as iniciais", async () => {
+  show("member");
+  await screen.findByRole("tablist", { name: "Tarefas por prazo" });
+  expect(document.querySelector(".dash-avatar")).toHaveTextContent("A");
 });
